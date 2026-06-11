@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name           Zen Tidy
+// @name           Zen Tidy Tabs
 // @description    Arc-style AI tab tidying integrated into Zen's native sidebar.
 //                 Adds a hover-reveal "Tidy" control next to Zen's Clear button.
 //                 Clicking it asks an LLM (via OpenRouter) to cluster the open
 //                 tabs, then builds native Zen tab groups. Double-click a group
 //                 label to rename / recolor it.
-// @author         you
+// @author         PCOffline
 // @include        main
 // ==/UserScript==
 
@@ -16,20 +16,25 @@
   // Configuration — everything tweakable lives here.
   // ============================================================================
   const CONFIG = {
-    debug: true,
+    debug: false,
 
     prefs: {
-      apiKey: "extensions.zentidy.apikey",     // OpenRouter key (sk-or-v1-...)
-      model: "extensions.zentidy.model",        // optional model slug override
-      labelStyle: "extensions.zentidy.labelstyle", // "filled" | "text"
+      apiKey: "zen-tidy-tabs.apikey",     // OpenRouter key (sk-or-v1-...)
+      model: "zen-tidy-tabs.model",        // optional model slug override
+      labelStyle: "zen-tidy-tabs.labelstyle", // "filled" | "text"
+      urlMode: "zen-tidy-tabs.urlmode",    // "detailed" | "compact" | "minimal"
     },
     api: {
       endpoint: "https://openrouter.ai/api/v1/chat/completions",
       defaultModel: "openai/gpt-4o-mini",
-      maxTokens: 2048,
+      maxTokens: 2048,      // floor; scaled up with tab count (see ai.request)
+      maxTokensCeiling: 8192,
+      temperature: 0.2,     // low → stable, repeatable clustering
+      seed: 7,              // passed through to providers that support it
+      timeoutMs: 90000,     // abort a hung request instead of locking the button
       // Sent as OpenRouter attribution headers.
-      referer: "https://github.com/zen-tidy",
-      title: "Zen Tidy",
+      referer: "https://github.com/PCOffline/zen-tidy-tabs",
+      title: "Zen Tidy Tabs",
       // Offered as quick suggestions in the settings modal.
       suggestedModels: [
         "openai/gpt-4o-mini",
@@ -40,8 +45,8 @@
     },
 
     ui: {
-      controlId: "zen-tidy-button",
-      styleId: "zen-tidy-style",
+      controlId: "zen-tidy-tabs-button",
+      styleId: "zen-tidy-tabs-style",
       label: "🧹 Tidy",
       busyLabel: "↻ Tidying…",
       // Display approximations of the 9 native group colors (the picker is
@@ -73,7 +78,7 @@
   // ============================================================================
   // Logging — log() always prints; debug() only when CONFIG.debug is on.
   // ============================================================================
-  const PREFIX = "[Zen Tidy]";
+  const PREFIX = "[Zen Tidy Tabs]";
   const log = (...args) => console.log(PREFIX, ...args);
   const warn = (...args) => console.warn(PREFIX, ...args);
   const fail = (...args) => console.error(PREFIX, ...args);
@@ -204,6 +209,10 @@
     apiKey() { return prefs.get(CONFIG.prefs.apiKey); },
     model() { return prefs.get(CONFIG.prefs.model, CONFIG.api.defaultModel); },
     labelStyle() { return prefs.get(CONFIG.prefs.labelStyle, "filled"); },
+    urlMode() {
+      const v = prefs.get(CONFIG.prefs.urlMode, "detailed");
+      return ["detailed", "compact", "minimal"].includes(v) ? v : "detailed";
+    },
   };
 
   // ============================================================================
@@ -233,11 +242,43 @@
     },
 
     title(t) { return (t.label || "").slice(0, CONFIG.snapshot.titleMax); },
-    url(t) { return (t.linkedBrowser?.currentURI?.spec || "").slice(0, CONFIG.snapshot.urlMax); },
+    rawUrl(t) { return t.linkedBrowser?.currentURI?.spec || ""; },
 
-    // Compact [{i, title, url}] list for the model.
+    // Build the URL string sent for a tab, per the user's detail preference.
+    // The query string and hash are ALWAYS stripped (never sent to the model):
+    //   detailed → title + domain + path     (default)
+    //   compact  → title + hostname only
+    //   minimal  → title only (no URL at all)
+    formatUrl(spec, mode) {
+      if (!spec || mode === "minimal") return "";
+      if (mode === "compact") {
+        try { return new win.URL(spec).hostname; } catch { return ""; }
+      }
+      // detailed: drop ?query and #hash; works for http(s), about:, chrome:, etc.
+      return spec.split("?")[0].split("#")[0].slice(0, CONFIG.snapshot.urlMax);
+    },
+
+    // The name of the group a tab currently lives in, or "" if ungrouped.
+    groupName(t) {
+      const g = t.group;
+      if (!g) return "";
+      return (g.label || g.getAttribute?.("label") || "").trim();
+    },
+
+    // Compact [{i, title, url?, group?}] list for the model. `url` honors the
+    // user's privacy mode (omitted entirely in "title" mode); `group` is only
+    // included when the tab is already grouped, so a re-tidy can keep stable
+    // groupings instead of reinventing names every run.
     snapshot(list) {
-      return list.map((t, i) => ({ i, title: tabs.title(t), url: tabs.url(t) }));
+      const mode = prefs.urlMode();
+      return list.map((t, i) => {
+        const entry = { i, title: tabs.title(t) };
+        const url = tabs.formatUrl(tabs.rawUrl(t), mode);
+        if (url) entry.url = url;
+        const group = tabs.groupName(t);
+        if (group) entry.group = group;
+        return entry;
+      });
     },
   };
 
@@ -251,12 +292,19 @@
     buildPrompt(snapshot) {
       const n = snapshot.length;
       const lastIndex = n - 1;
+      // Allow a single group when everything shares a theme; cap groups so we
+      // never shatter a small workspace into many singletons.
+      const cap = Math.min(8, Math.max(2, Math.ceil(n / 3)));
+      const hasGroups = snapshot.some((t) => t.group);
       return [
         `You are "Tidy", an engine that organizes a browser sidebar's open tabs`,
         `into a small set of clean, intuitive groups — like Arc's "Tidy Tabs".`,
         ``,
         `## Input`,
-        `${n} tabs, each {"i": <index 0-${lastIndex}>, "title": <string>, "url": <string>}:`,
+        `${n} tabs. Each object has {"i": <index 0-${lastIndex}>, "title": <string>}`,
+        `and may also include "url": <string> and "group": <string> (the name of`,
+        `the group the tab is CURRENTLY in). Treat "group" as a strong hint, not a`,
+        `command. Use whatever fields are present; the title is always the primary signal.`,
         ``,
         `<tabs>`,
         JSON.stringify(snapshot),
@@ -272,39 +320,62 @@
         `- Keep granularity consistent: groups of roughly comparable size.`,
         `  Avoid one giant catch-all sitting next to several singletons.`,
         `- Merge near-duplicates (the same product, repeated searches) together.`,
+        hasGroups
+          ? `- STABILITY: many tabs already have a "group" name. When a tab's current\n  group still makes sense, KEEP it there and reuse that exact name — do not\n  rename or reshuffle a sensible group just to change it. Prefer adding new\n  tabs into a fitting existing group over inventing a parallel one.\n- REORGANIZE only with a clear reason: e.g. new tabs make a BROADER category\n  sensible (an existing "Cooking" group plus new chicken-care tabs becomes\n  "Chicken"), or the current split is clearly wrong. A broader, more accurate\n  category is worth moving older tabs for; cosmetic churn is not.`
+          : ``,
+        ``,
+        `## Grounding (critical)`,
+        `- Use ONLY the titles and URLs given. Never invent a theme that the`,
+        `  tabs do not clearly support. If no tab is about sports, there is no`,
+        `  "Sports" group. Every group must be justified by its members.`,
         ``,
         `## Avoid`,
-        `- A vague mega-group like "Web", "Other", or "Misc" holding most tabs.`,
+        `- A vague mega-group holding most tabs.`,
         `- Many one-tab groups when those tabs share an obvious theme.`,
         `- Two different groups that mean the same thing.`,
         ``,
         `## Naming`,
         `- 1-3 words, Title Case, human-readable. No emojis, no quotes.`,
         `- Name the shared theme, not a list of the items.`,
+        `- NEVER use "Misc", "Other", "Various", "General", "Web", or "Stuff".`,
+        `  If a tab seems unrelated, give it the most specific name you can or`,
+        `  fold it into the closest genuinely-related group.`,
         ``,
         `## Hard constraints (must all hold)`,
-        `1. Produce between 2 and 8 groups.`,
+        `1. Produce between 1 and ${cap} groups (1 is fine if every tab shares one theme).`,
         `2. Every index 0-${lastIndex} appears in EXACTLY ONE group.`,
         `   Never skip an index, never repeat one, never invent one out of range.`,
-        `3. Output ONLY a single JSON object: no prose, no markdown, no code`,
-        `   fences, nothing before or after it.`,
+        `3. Output ONLY a single JSON object matching the schema — no prose,`,
+        `   no markdown, no code fences.`,
         ``,
         `## Output schema`,
         `{"groups":[{"name":"<Title Case label>","tabs":[<indices>]}]}`,
         ``,
-        `## Example`,
-        `Input: [{"i":0,"title":"Horses - Wynncraft Wiki"},{"i":1,"title":"Wynncraft Market"},{"i":2,"title":"Best Beef Chili Recipe"},{"i":3,"title":"Van Gogh Mouse Pad - AliExpress"},{"i":4,"title":"Monet Mouse Pad - AliExpress"}]`,
+        `## Examples`,
+        `Input: [{"i":0,"title":"Horses - Wynncraft Wiki","url":"wiki.wynncraft.com/horses"},{"i":1,"title":"Wynncraft Market","url":"trade.wynncraft.com"},{"i":2,"title":"Best Beef Chili Recipe","url":"allrecipes.com/chili"},{"i":3,"title":"Van Gogh Mouse Pad - AliExpress","url":"aliexpress.com/x"},{"i":4,"title":"Monet Mouse Pad - AliExpress","url":"aliexpress.com/y"}]`,
         `Output: {"groups":[{"name":"Wynncraft","tabs":[0,1]},{"name":"Mouse Pad Shopping","tabs":[3,4]},{"name":"Recipes","tabs":[2]}]}`,
         ``,
-        `Before answering, check that every index 0-${lastIndex} is used exactly`,
-        `once. Then output only the JSON object.`,
-      ].join("\n");
+        `Input (all one theme): [{"i":0,"title":"React useEffect docs","url":"react.dev"},{"i":1,"title":"React Router tutorial","url":"reactrouter.com"},{"i":2,"title":"Why my React app re-renders","url":"stackoverflow.com"}]`,
+        `Output: {"groups":[{"name":"React","tabs":[0,1,2]}]}`,
+        ``,
+        `Now output only the JSON object.`,
+      ].filter((line) => line !== "").join("\n");
     },
 
     async request(snapshot, apiKey, model) {
+      const n = snapshot.length;
+      const max_tokens = Math.min(
+        CONFIG.api.maxTokensCeiling,
+        Math.max(CONFIG.api.maxTokens, n * 24 + 256)
+      );
       const body = {
         model,
-        max_tokens: CONFIG.api.maxTokens,
+        temperature: CONFIG.api.temperature,
+        seed: CONFIG.api.seed,
+        max_tokens,
+        // Ask the provider to guarantee a JSON object. Hugely improves
+        // reliability; we degrade gracefully if a model rejects it.
+        response_format: { type: "json_object" },
         messages: [
           {
             role: "system",
@@ -318,21 +389,52 @@
         ],
       };
 
-      debug("calling OpenRouter, model:", model);
-      const res = await fetch(CONFIG.api.endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer " + apiKey,
-          "HTTP-Referer": CONFIG.api.referer,
-          "X-Title": CONFIG.api.title,
-        },
-        body: JSON.stringify(body),
-      });
+      try {
+        return await ai._post(body, apiKey);
+      } catch (e) {
+        // Some models/providers reject response_format. Retry once without it.
+        if (e?.status === 400 && /response_format|json/i.test(e.message || "")) {
+          warn("model rejected response_format; retrying without it");
+          delete body.response_format;
+          return await ai._post(body, apiKey);
+        }
+        throw e;
+      }
+    },
+
+    // POST to OpenRouter with a hard timeout so a hung request can never lock
+    // the Tidy button indefinitely.
+    async _post(body, apiKey) {
+      debug("calling OpenRouter, model:", body.model);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), CONFIG.api.timeoutMs);
+      let res;
+      try {
+        res = await fetch(CONFIG.api.endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + apiKey,
+            "HTTP-Referer": CONFIG.api.referer,
+            "X-Title": CONFIG.api.title,
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+      } catch (e) {
+        if (e?.name === "AbortError") {
+          throw new Error(`OpenRouter request timed out after ${CONFIG.api.timeoutMs / 1000}s`);
+        }
+        throw e;
+      } finally {
+        clearTimeout(timer);
+      }
 
       debug("API responded HTTP", res.status);
       if (!res.ok) {
-        throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 300)}`);
+        const err = new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 300)}`);
+        err.status = res.status;
+        throw err;
       }
       return res.json();
     },
@@ -359,7 +461,7 @@
           "(e.g. openai/gpt-4o-mini) instead of a free/reasoning router."
         );
       }
-      return content.replace(/```json|```/g, "").trim();
+      return content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
     },
 
     // Parse the model's text into validated [{name, tabs:[<tabEl>]}] groups,
@@ -377,9 +479,10 @@
 
       const used = new Set();
       const groups = [];
-      for (const group of parsed.groups || []) {
+      const groupList = Array.isArray(parsed?.groups) ? parsed.groups : [];
+      for (const group of groupList) {
         const members = [];
-        for (const index of group.tabs || []) {
+        for (const index of Array.isArray(group?.tabs) ? group.tabs : []) {
           const tab = sourceTabs[index];
           if (tab && !used.has(index)) {
             used.add(index);
@@ -399,19 +502,35 @@
   // Native Zen tab groups
   // ============================================================================
   const groups = {
-    // Create one native group. Zen's addTabGroup dereferences `insertBefore`,
-    // so we always pass an anchor tab. Different builds expect slightly
-    // different option shapes, hence the staged fallbacks.
+    // Normalize a group name for matching existing groups across a re-tidy.
+    norm(name) { return (name || "").trim().toLowerCase(); },
+
+    // Create one fresh native group from `members`. To guarantee the new group
+    // is never NESTED inside another, any member that currently lives in a
+    // group is first pulled out to the top level (gBrowser.ungroupTab), so the
+    // insertBefore anchor is always a top-level tab.
     create(members, label, color) {
+      if (typeof gBrowser.ungroupTab === "function") {
+        for (const t of members) {
+          if (t.group) { try { gBrowser.ungroupTab(t); } catch (e) { debug("ungroupTab failed:", e?.message); } }
+        }
+      }
       const anchor = members[0];
       const attempts = [
         { label, color, insertBefore: anchor },
         { label, color },
-        { id: label, color, label, insertBefore: anchor, isUserTriggered: true },
+        { label, color, isUserTriggered: true },
       ];
       for (const options of attempts) {
         try {
-          gBrowser.addTabGroup(members, options);
+          const group = gBrowser.addTabGroup(members, options);
+          // Some builds ignore the label/color options; set them explicitly.
+          if (group) {
+            try {
+              if (label) group.label = label;
+              if (color) group.color = color;
+            } catch { /* non-fatal */ }
+          }
           return true;
         } catch (e) {
           debug("addTabGroup attempt failed for", label, e?.message);
@@ -421,39 +540,190 @@
       return false;
     },
 
-    // Build every group, skipping tabs closed mid-tidy and empty groups.
+    // Map of normalized group-name -> group element in the active workspace.
+    existingByName() {
+      const map = new Map();
+      const section = dom.activeSection() || doc;
+      for (const groupEl of section.querySelectorAll("tab-group")) {
+        const key = groups.norm(groupEl.label || groupEl.getAttribute?.("label"));
+        if (key && !map.has(key)) map.set(key, groupEl);
+      }
+      return map;
+    },
+
+    // Map of existing group-name -> color, used by the recreate() fallback.
+    colorByName() {
+      const map = {};
+      for (const [, groupEl] of groups.existingByName()) {
+        const name = (groupEl.label || groupEl.getAttribute?.("label") || "").trim();
+        const color = groupEl.color || groupEl.getAttribute?.("color") || "";
+        if (name && color && !(name in map)) map[name] = color;
+      }
+      return map;
+    },
+
+    // Can we move tabs between groups in place? (Modern Zen/Firefox.)
+    canReconcile(existing) {
+      for (const [, el] of existing) {
+        return typeof el.addTabs === "function" && typeof gBrowser.ungroupTab === "function";
+      }
+      return true; // no existing groups → everything is a fresh create anyway
+    },
+
+    // Apply the model's plan. Dispatches to an in-place reconcile (preferred,
+    // minimal disruption) or a flatten+rebuild fallback for older builds.
     apply(plan) {
       if (typeof gBrowser.addTabGroup !== "function") {
         throw new Error("gBrowser.addTabGroup is unavailable in this Zen build.");
       }
+      const existing = groups.existingByName();
+      if (groups.canReconcile(existing)) groups.reconcile(plan, existing);
+      else groups.recreate(plan, groups.colorByName());
+    },
+
+    // In-place reconcile against current groups. Groups whose name survives are
+    // KEPT in place (position + color preserved); only the tabs that actually
+    // changed are moved. Genuinely new groups are created; groups the plan
+    // abandoned empty out and dissolve. This keeps the sidebar stable when the
+    // change is minor, while still letting categories broaden or reorganize.
+    reconcile(plan, existing) {
+      const usedColors = new Set();
+      const matched = new Set();
       let colorIndex = 0;
+
+      const pickColor = () => {
+        const palette = CONFIG.grouping.colors;
+        let c;
+        do { c = palette[colorIndex++ % palette.length]; }
+        while (usedColors.has(c) && colorIndex <= palette.length);
+        return c;
+      };
+
       for (const group of plan) {
         const live = group.tabs.filter(tabs.isAlive);
         const dropped = group.tabs.length - live.length;
         if (dropped) warn(`${group.name}: skipped ${dropped} tab(s) closed mid-tidy`);
         if (!live.length) { debug("skipping empty group:", group.name); continue; }
 
-        const color = CONFIG.grouping.colors[colorIndex++ % CONFIG.grouping.colors.length];
-        debug(`creating group: ${group.name} (${live.length} tabs, ${color})`);
+        const el = existing.get(groups.norm(group.name));
+        if (el && typeof el.addTabs === "function") {
+          // Keep this group in place; move in only the tabs not already here.
+          matched.add(el);
+          usedColors.add(el.color || el.getAttribute?.("color") || "");
+          const toAdd = live.filter((t) => t.group !== el);
+          if (toAdd.length) {
+            debug(`updating group: ${group.name} (+${toAdd.length} tab(s))`);
+            try { el.addTabs(toAdd); } catch (e) { warn("addTabs failed:", e); }
+          }
+        } else {
+          const color = pickColor();
+          usedColors.add(color);
+          debug(`creating group: ${group.name} (${live.length} tabs, ${color})`);
+          groups.create(live, group.name, color);
+        }
+      }
+
+      // Any existing group the plan didn't reuse has had its tabs pulled into
+      // other groups; dissolve whatever is left so it doesn't linger.
+      for (const [, el] of existing) {
+        if (matched.has(el)) continue;
+        if (groups.hasLiveTabs(el)) {
+          try { el.ungroupTabs?.(); } catch (e) { warn("ungroupTabs failed:", e); }
+        }
+      }
+    },
+
+    // Fallback for builds without in-place moves: flatten everything, then
+    // build groups fresh, preserving colors for names that survive.
+    recreate(plan, prevColors = {}) {
+      groups.flattenAll();
+      let colorIndex = 0;
+      const usedColors = new Set();
+      for (const group of plan) {
+        const live = group.tabs.filter(tabs.isAlive);
+        if (!live.length) continue;
+        let color = prevColors[group.name];
+        if (!color || usedColors.has(color)) {
+          const palette = CONFIG.grouping.colors;
+          do { color = palette[colorIndex++ % palette.length]; }
+          while (usedColors.has(color) && colorIndex <= palette.length);
+        }
+        usedColors.add(color);
         groups.create(live, group.name, color);
       }
     },
 
-    // Dissolve any group left empty after a re-tidy moved its tabs elsewhere.
-    removeEmpty() {
-      let removed = 0;
-      for (const groupEl of doc.querySelectorAll("tab-group")) {
-        if (groupEl.querySelector("tab, .tabbrowser-tab")) continue;
+    // Dissolve every existing group in the active workspace, keeping their tabs
+    // (recreate() fallback only).
+    flattenAll() {
+      const section = dom.activeSection() || doc;
+      for (const groupEl of [...section.querySelectorAll("tab-group")]) {
         try {
-          if (typeof groupEl.ungroup === "function") groupEl.ungroup();
-          else if (typeof gBrowser.removeTabGroup === "function") gBrowser.removeTabGroup(groupEl);
+          if (typeof groupEl.ungroupTabs === "function") groupEl.ungroupTabs();
+          else if (typeof gBrowser.ungroupTab === "function") {
+            for (const t of [...(groupEl.tabs || groupEl.querySelectorAll("tab, .tabbrowser-tab"))]) {
+              gBrowser.ungroupTab(t);
+            }
+          }
+        } catch (e) {
+          warn("could not flatten group:", e);
+        }
+      }
+    },
+
+    // Is a group element holding at least one tab that isn't closing?
+    hasLiveTabs(groupEl) {
+      const list = groupEl.tabs || groupEl.querySelectorAll("tab, .tabbrowser-tab");
+      for (const t of list) { if (tabs.isAlive(t)) return true; }
+      return false;
+    },
+
+    // Dissolve any group left empty (after a re-tidy, a close, or a manual
+    // drag moved its last tab out). Scoped to the active workspace.
+    removeEmpty() {
+      const section = dom.activeSection() || doc;
+      let removed = 0;
+      for (const groupEl of [...section.querySelectorAll("tab-group")]) {
+        if (groups.hasLiveTabs(groupEl)) continue;
+        // Don't dissolve a group the user is mid-rename on.
+        if (groupEl.querySelector?.(".zen-tidy-tabs-inline-editing")) continue;
+        try {
+          // The group is empty, so removing it never closes a live tab.
+          if (typeof gBrowser.removeTabGroup === "function") gBrowser.removeTabGroup(groupEl);
           else groupEl.remove();
           removed++;
         } catch (e) {
-          warn("could not remove empty group:", e);
+          try { groupEl.remove(); removed++; } catch { warn("could not remove empty group:", e); }
         }
       }
       if (removed) debug("removed", removed, "empty group(s)");
+      return removed;
+    },
+
+    // Tab removal animates, so a single check can miss a just-emptied group.
+    // Poll a few times to reliably catch the group becoming empty.
+    scheduleEmptyCheck() {
+      let tries = 0;
+      const tick = () => {
+        groups.removeEmpty();
+        if (++tries < 6) setTimeout(tick, 150);
+      };
+      setTimeout(tick, 80);
+    },
+
+    // Watch the tab strip so groups emptied by native drag-and-drop also get
+    // dissolved (the "groups don't always close when empty" bug).
+    installEmptyWatcher() {
+      if (win.__zenTidyTabsEmptyWatcher) return;
+      win.__zenTidyTabsEmptyWatcher = true;
+      const root = doc.getElementById("tabbrowser-tabs") || doc.documentElement;
+      let pending = null;
+      const observer = new win.MutationObserver(() => {
+        if (pending) return;
+        pending = setTimeout(() => { pending = null; groups.removeEmpty(); }, 500);
+      });
+      observer.observe(root, { childList: true, subtree: true });
+      debug("empty-group watcher installed on", dom.describe(root));
     },
 
     // Close every tab in a group (and let the now-empty group dissolve).
@@ -463,7 +733,7 @@
       for (const tab of members) {
         try { gBrowser.removeTab(tab, { animate: true }); } catch (e) { warn("removeTab failed:", e); }
       }
-      setTimeout(() => groups.removeEmpty(), 60);
+      groups.scheduleEmptyCheck();
     },
   };
 
@@ -478,20 +748,20 @@
       return node;
     },
     field(labelText, control) {
-      const wrap = mk.el("div", "zentidy-field");
-      const label = mk.el("label", "zentidy-label", labelText);
+      const wrap = mk.el("div", "zen-tidy-tabs-field");
+      const label = mk.el("label", "zen-tidy-tabs-label", labelText);
       wrap.append(label, control);
       return wrap;
     },
     input(value, { type = "text", placeholder = "" } = {}) {
-      const input = mk.el("input", "zentidy-input");
+      const input = mk.el("input", "zen-tidy-tabs-input");
       input.type = type;
       input.value = value ?? "";
       if (placeholder) input.placeholder = placeholder;
       return input;
     },
     button(text, variant = "") {
-      return mk.el("button", "zentidy-btn" + (variant ? " " + variant : ""), text);
+      return mk.el("button", "zen-tidy-tabs-btn" + (variant ? " " + variant : ""), text);
     },
   };
 
@@ -504,25 +774,33 @@
     open(title) {
       modal.close();
 
-      const overlay = mk.el("div", "zentidy-overlay");
-      overlay.id = "zentidy-overlay";
-      const panel = mk.el("div", "zentidy-modal");
+      const overlay = mk.el("div", "zen-tidy-tabs-overlay");
+      overlay.id = "zen-tidy-tabs-overlay";
+      const panel = mk.el("div", "zen-tidy-tabs-modal");
+      panel.setAttribute("role", "dialog");
+      panel.setAttribute("aria-modal", "true");
+      panel.setAttribute("aria-label", title);
 
-      const header = mk.el("div", "zentidy-modal-header");
-      header.append(mk.el("div", "zentidy-modal-title", title));
-      const closeBtn = mk.el("button", "zentidy-modal-close", "✕");
+      const header = mk.el("div", "zen-tidy-tabs-modal-header");
+      header.append(mk.el("div", "zen-tidy-tabs-modal-title", title));
+      const closeBtn = mk.el("button", "zen-tidy-tabs-modal-close", "✕");
+      closeBtn.setAttribute("aria-label", "Close");
       closeBtn.addEventListener("click", modal.close);
       header.append(closeBtn);
 
-      const body = mk.el("div", "zentidy-modal-body");
-      const footer = mk.el("div", "zentidy-modal-footer");
+      const body = mk.el("div", "zen-tidy-tabs-modal-body");
+      const footer = mk.el("div", "zen-tidy-tabs-modal-footer");
 
       panel.append(header, body, footer);
       overlay.append(panel);
 
       // Click outside the panel, or Escape, closes the modal.
       overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) modal.close(); });
-      modal._escHandler = (e) => { if (e.key === "Escape") modal.close(); };
+      modal._escHandler = (e) => {
+        if (e.key === "Escape") { modal.close(); return; }
+        // Keep Tab focus trapped inside the panel.
+        if (e.key === "Tab") modal._trapTab(e, panel);
+      };
       doc.addEventListener("keydown", modal._escHandler, true);
 
       (doc.documentElement || doc.body).appendChild(overlay);
@@ -530,12 +808,31 @@
       return { overlay, body, footer };
     },
 
+    // Cycle focus among the panel's focusable elements instead of escaping to
+    // the underlying chrome.
+    _trapTab(e, panel) {
+      const focusable = [...panel.querySelectorAll(
+        "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"
+      )].filter((el) => !el.disabled && el.offsetParent !== null);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = doc.activeElement;
+      if (e.shiftKey && (active === first || !panel.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    },
+
     close() {
       if (modal._escHandler) {
         doc.removeEventListener("keydown", modal._escHandler, true);
         modal._escHandler = null;
       }
-      doc.getElementById("zentidy-overlay")?.remove();
+      doc.getElementById("zen-tidy-tabs-overlay")?.remove();
     },
   };
 
@@ -545,16 +842,16 @@
   const ui = {
     // A reusable swatch grid bound to the 9 native group colors.
     colorPicker(initial) {
-      const grid = mk.el("div", "zentidy-swatches");
+      const grid = mk.el("div", "zen-tidy-tabs-swatches");
       let selected = initial || CONFIG.grouping.colors[0];
       for (const name of CONFIG.grouping.colors) {
-        const swatch = mk.el("button", "zentidy-swatch");
+        const swatch = mk.el("button", "zen-tidy-tabs-swatch");
         swatch.style.setProperty("--swatch", CONFIG.ui.swatchHex[name]);
         swatch.title = name;
         if (name === selected) swatch.classList.add("selected");
         swatch.addEventListener("click", () => {
           selected = name;
-          grid.querySelectorAll(".zentidy-swatch").forEach((s) => s.classList.remove("selected"));
+          grid.querySelectorAll(".zen-tidy-tabs-swatch").forEach((s) => s.classList.remove("selected"));
           swatch.classList.add("selected");
         });
         grid.append(swatch);
@@ -592,7 +889,7 @@
         modal.close();
       });
 
-      footer.append(closeGroup, mk.el("div", "zentidy-spacer"), cancel, save);
+      footer.append(closeGroup, mk.el("div", "zen-tidy-tabs-spacer"), cancel, save);
       name.focus();
       name.select();
     },
@@ -605,7 +902,7 @@
       const model = mk.input(prefs.model(), { placeholder: CONFIG.api.defaultModel });
 
       // Model suggestions via a datalist.
-      const listId = "zentidy-model-list";
+      const listId = "zen-tidy-tabs-model-list";
       const datalist = mk.el("datalist");
       datalist.id = listId;
       for (const slug of CONFIG.api.suggestedModels) {
@@ -615,24 +912,41 @@
       }
       model.setAttribute("list", listId);
 
-      // Segmented control for label appearance.
-      let labelStyle = prefs.labelStyle();
-      const segment = mk.el("div", "zentidy-segment");
-      const makeSeg = (value, text) => {
-        const seg = mk.el("button", "zentidy-seg", text);
-        if (value === labelStyle) seg.classList.add("active");
-        seg.addEventListener("click", () => {
-          labelStyle = value;
-          segment.querySelectorAll(".zentidy-seg").forEach((s) => s.classList.remove("active"));
-          seg.classList.add("active");
-        });
-        return seg;
+      // Reusable segmented control: options = [[value, text], ...].
+      const makeSegment = (options, current) => {
+        let value = current;
+        const seg = mk.el("div", "zen-tidy-tabs-segment");
+        for (const [val, text] of options) {
+          const btn = mk.el("button", "zen-tidy-tabs-seg", text);
+          if (val === current) btn.classList.add("active");
+          btn.addEventListener("click", () => {
+            value = val;
+            seg.querySelectorAll(".zen-tidy-tabs-seg").forEach((s) => s.classList.remove("active"));
+            btn.classList.add("active");
+          });
+          seg.append(btn);
+        }
+        return { el: seg, get: () => value };
       };
-      segment.append(makeSeg("filled", "Colored"), makeSeg("text", "Text only"));
 
-      const hint = mk.el("p", "zentidy-hint");
+      const labelSeg = makeSegment(
+        [["filled", "Colored"], ["text", "Text only"]],
+        prefs.labelStyle()
+      );
+
+      const urlSeg = makeSegment(
+        [["detailed", "Detailed"], ["compact", "Compact"], ["minimal", "Minimal"]],
+        prefs.urlMode()
+      );
+      const urlHint = mk.el(
+        "p", "zen-tidy-tabs-hint",
+        "What each tab sends to the AI — Detailed: title + URL · Compact: title + domain · " +
+        "Minimal: title only. Query strings are never sent."
+      );
+
+      const hint = mk.el("p", "zen-tidy-tabs-hint");
       hint.append(doc.createTextNode("Key is stored locally. Get one at "));
-      const link = mk.el("a", "zentidy-link", "openrouter.ai/keys");
+      const link = mk.el("a", "zen-tidy-tabs-link", "openrouter.ai/keys");
       link.addEventListener("click", () => win.openTrustedLinkIn?.("https://openrouter.ai/keys", "tab"));
       hint.append(link, doc.createTextNode("."));
 
@@ -640,7 +954,9 @@
         mk.field("OpenRouter API key", key),
         mk.field("Model", model),
         datalist,
-        mk.field("Group labels", segment),
+        mk.field("Group labels", labelSeg.el),
+        mk.field("Tab info sent to AI", urlSeg.el),
+        urlHint,
         hint
       );
 
@@ -651,13 +967,14 @@
       save.addEventListener("click", () => {
         prefs.set(CONFIG.prefs.apiKey, key.value.trim());
         prefs.set(CONFIG.prefs.model, model.value.trim());
-        prefs.set(CONFIG.prefs.labelStyle, labelStyle);
+        prefs.set(CONFIG.prefs.labelStyle, labelSeg.get());
+        prefs.set(CONFIG.prefs.urlMode, urlSeg.get());
         styles.inject(); // re-apply label appearance immediately
         modal.close();
         orchestrator.notify("Settings saved.");
       });
 
-      footer.append(mk.el("div", "zentidy-spacer"), cancel, save);
+      footer.append(mk.el("div", "zen-tidy-tabs-spacer"), cancel, save);
       key.focus();
     },
   };
@@ -677,7 +994,7 @@
       el.setAttribute("label", CONFIG.ui.label); // for XUL toolbarbutton twins
       el.setAttribute("tooltiptext", "Tidy tabs with AI");
       el.title = "Tidy tabs with AI";
-      el.className = twinOf ? twinOf.className : "zen-tidy-fallback";
+      el.className = twinOf ? twinOf.className : "zen-tidy-tabs-fallback";
       if (twinOf) el.dataset.twin = "1";
 
       const onTidy = (e) => { e.preventDefault(); e.stopPropagation(); orchestrator.runTidy(); };
@@ -708,8 +1025,8 @@
     // hovered. Watch for that and place the twin the moment Clear appears; the
     // watcher stays installed so the twin is re-created if Zen rebuilds the row.
     installClearWatcher() {
-      if (win.__zenTidyClearWatcher) return;
-      win.__zenTidyClearWatcher = true;
+      if (win.__zenTidyTabsClearWatcher) return;
+      win.__zenTidyTabsClearWatcher = true;
       // Hover anywhere in the chrome: cheap because placeTwinIfClearPresent
       // early-returns once a twin exists.
       const target = doc.documentElement;
@@ -750,25 +1067,107 @@
   };
 
   // ============================================================================
-  // UI — double-click a group label to rename + recolor
+  // UI — group label editing.
+  //   single click (settled for 300ms) → inline rename
+  //   double click (2nd click within 300ms) → full edit modal (name + color)
+  // A debounce disambiguates the two so a double-click never leaves the label
+  // stuck in the inline-edit state.
   // ============================================================================
   const editor = {
+    _clickTimer: null,
+    _editing: null, // { labelEl, group, original, cleanup }
+
     install() {
-      if (win.__zenTidyEditorInstalled) return;
-      win.__zenTidyEditorInstalled = true;
+      if (win.__zenTidyTabsEditorInstalled) return;
+      win.__zenTidyTabsEditorInstalled = true;
 
       doc.addEventListener(
-        "dblclick",
+        "click",
         (e) => {
-          const group = dom.groupFromEvent(e.target);
+          const labelEl = e.target?.closest?.(".tab-group-label");
+          if (!labelEl) return;
+          const group = labelEl.closest("tab-group");
           if (!group) return;
+
+          // Already editing this label? Let the click position the caret.
+          if (editor._editing && editor._editing.labelEl === labelEl) return;
+
+          // We own this interaction: block Zen's native click (collapse / its
+          // own inline edit) so single vs double is decided here.
           e.preventDefault();
           e.stopPropagation();
-          ui.editGroup(group);
+
+          if (editor._clickTimer) {
+            clearTimeout(editor._clickTimer);
+            editor._clickTimer = null;
+            editor.cancelInline();
+            if (!doc.getElementById("zen-tidy-tabs-overlay")) ui.editGroup(group);
+            return;
+          }
+          editor._clickTimer = setTimeout(() => {
+            editor._clickTimer = null;
+            editor.startInline(group, labelEl);
+          }, 300);
         },
-        true // capture, so we act before the label's collapse handler
+        true // capture, so we act before the label's own handler
       );
-      debug("group editor installed (double-click a group label)");
+      debug("group editor installed (click to rename, double-click for options)");
+    },
+
+    startInline(group, labelEl) {
+      editor.cancelInline();
+      const original = (group.label ?? labelEl.textContent ?? "").trim();
+      labelEl.setAttribute("contenteditable", "true");
+      labelEl.classList.add("zen-tidy-tabs-inline-editing");
+      labelEl.focus();
+      try {
+        const range = doc.createRange();
+        range.selectNodeContents(labelEl);
+        const sel = win.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } catch { /* selection not critical */ }
+
+      const commit = () => {
+        const name = (labelEl.textContent || "").trim();
+        editor.finishInline();
+        if (name && name !== original) {
+          try { group.label = name; group.setAttribute("label", name); }
+          catch (e) { fail("could not rename group:", e); labelEl.textContent = original; }
+        } else {
+          labelEl.textContent = original;
+        }
+      };
+      const onKey = (e) => {
+        if (e.key === "Enter") { e.preventDefault(); labelEl.blur(); }
+        else if (e.key === "Escape") { e.preventDefault(); labelEl.textContent = original; labelEl.blur(); }
+        e.stopPropagation();
+      };
+      labelEl.addEventListener("keydown", onKey, true);
+      labelEl.addEventListener("blur", commit, { once: true });
+      editor._editing = {
+        labelEl,
+        group,
+        original,
+        cleanup: () => labelEl.removeEventListener("keydown", onKey, true),
+      };
+    },
+
+    finishInline() {
+      const e = editor._editing;
+      if (!e) return;
+      editor._editing = null;
+      e.cleanup?.();
+      e.labelEl.removeAttribute("contenteditable");
+      e.labelEl.classList.remove("zen-tidy-tabs-inline-editing");
+    },
+
+    // Abandon an in-progress inline edit, restoring the original name.
+    cancelInline() {
+      const e = editor._editing;
+      if (!e) return;
+      e.labelEl.textContent = e.original;
+      editor.finishInline();
     },
   };
 
@@ -786,17 +1185,22 @@
       accent: "var(--zen-primary-color, #6c5ce7)",
     },
 
-    // Text-only labels: drop the filled background, show the name in the
-    // group's color. Empty when the user keeps the default "filled" style.
+    // Text-only labels: Arc-style. Drop the colored background entirely and
+    // render the name in a neutral, theme-aware color with a bold weight, so
+    // labels never clash with the Zen theme (too dark / too bright). Empty when
+    // the user keeps the default "filled" style.
     labelStyleCss() {
       if (prefs.labelStyle() !== "text") return "";
       return `
         .tab-group-label {
           background: transparent !important;
-          color: var(--tab-group-color, currentColor) !important;
-          font-weight: 600 !important;
+          color: var(--zen-primary-color, #ECECEC) !important;
+          opacity: .72;
+          font-weight: 700 !important;
+          letter-spacing: .01em;
           text-shadow: none !important;
         }
+        .tab-group-label:hover { opacity: .9; }
       `;
     },
 
@@ -816,7 +1220,7 @@
           box-shadow: none !important;
         }
         #${CONFIG.ui.controlId}::before { content: none !important; }
-        #${CONFIG.ui.controlId}.zen-tidy-fallback {
+        #${CONFIG.ui.controlId}.zen-tidy-tabs-fallback {
           display: block !important;
           visibility: visible !important;
           box-sizing: border-box;
@@ -829,19 +1233,19 @@
           opacity: 0;
           transition: opacity .12s ease;
         }
-        .zen-workspace-tabs-section:hover #${CONFIG.ui.controlId}.zen-tidy-fallback { opacity: .85; }
-        #${CONFIG.ui.controlId}.zen-tidy-fallback:hover { opacity: 1; }
+        .zen-workspace-tabs-section:hover #${CONFIG.ui.controlId}.zen-tidy-tabs-fallback { opacity: .85; }
+        #${CONFIG.ui.controlId}.zen-tidy-tabs-fallback:hover { opacity: 1; }
 
         /* ---- Modal ---- */
-        .zentidy-overlay {
+        .zen-tidy-tabs-overlay {
           position: fixed; inset: 0; z-index: 2147483647;
           display: flex; align-items: center; justify-content: center;
           background: rgba(0,0,0,.45);
           -moz-window-dragging: no-drag;
           opacity: 0; transition: opacity .14s ease;
         }
-        .zentidy-overlay.open { opacity: 1; }
-        .zentidy-modal {
+        .zen-tidy-tabs-overlay.open { opacity: 1; }
+        .zen-tidy-tabs-modal {
           width: 340px; max-width: calc(100vw - 32px);
           background: ${v.bg};
           color: ${v.text};
@@ -853,77 +1257,87 @@
           transform: translateY(6px) scale(.985);
           transition: transform .14s ease;
         }
-        .zentidy-overlay.open .zentidy-modal { transform: none; }
-        .zentidy-modal-header {
+        .zen-tidy-tabs-overlay.open .zen-tidy-tabs-modal { transform: none; }
+        .zen-tidy-tabs-modal-header {
           display: flex; align-items: center; justify-content: space-between;
           padding: 14px 16px 10px;
         }
-        .zentidy-modal-title { font-size: 14px; font-weight: 600; }
-        .zentidy-modal-close {
+        .zen-tidy-tabs-modal-title { font-size: 14px; font-weight: 600; }
+        .zen-tidy-tabs-modal-close {
           all: unset; cursor: pointer; color: ${v.muted};
           width: 22px; height: 22px; border-radius: 6px; text-align: center;
         }
-        .zentidy-modal-close:hover { background: ${v.elevated}; color: ${v.text}; }
-        .zentidy-modal-body { padding: 4px 16px 8px; display: flex; flex-direction: column; gap: 14px; }
-        .zentidy-modal-footer {
+        .zen-tidy-tabs-modal-close:hover { background: ${v.elevated}; color: ${v.text}; }
+        .zen-tidy-tabs-modal-body { padding: 4px 16px 8px; display: flex; flex-direction: column; gap: 14px; }
+        .zen-tidy-tabs-modal-footer {
           display: flex; align-items: center; gap: 8px;
           padding: 12px 16px 16px;
         }
-        .zentidy-spacer { flex: 1; }
+        .zen-tidy-tabs-spacer { flex: 1; }
 
-        .zentidy-field { display: flex; flex-direction: column; gap: 6px; }
-        .zentidy-label { font-size: 11px; color: ${v.muted}; font-weight: 600; }
-        .zentidy-input {
+        .zen-tidy-tabs-field { display: flex; flex-direction: column; gap: 6px; }
+        .zen-tidy-tabs-label { font-size: 11px; color: ${v.muted}; font-weight: 600; }
+        .zen-tidy-tabs-input {
           all: unset; box-sizing: border-box; width: 100%;
           padding: 8px 10px; font-size: 13px;
           color: ${v.text};
           background: ${v.elevated};
           border: 1px solid ${v.border}; border-radius: 9px;
         }
-        .zentidy-input:focus-within, .zentidy-input:focus {
+        .zen-tidy-tabs-input:focus-within, .zen-tidy-tabs-input:focus {
           border-color: ${v.accent};
         }
 
         /* ---- Color swatches (the 9 native group colors) ---- */
-        .zentidy-swatches { display: flex; flex-wrap: wrap; gap: 10px; padding: 2px 0; }
-        .zentidy-swatch {
+        .zen-tidy-tabs-swatches { display: flex; flex-wrap: wrap; gap: 10px; padding: 2px 0; }
+        .zen-tidy-tabs-swatch {
           all: unset; cursor: pointer;
           width: 26px; height: 26px; border-radius: 50%;
           background: var(--swatch);
           box-shadow: 0 0 0 2px transparent, 0 1px 3px rgba(0,0,0,.3);
           transition: box-shadow .12s ease, transform .12s ease;
         }
-        .zentidy-swatch:hover { transform: scale(1.08); }
-        .zentidy-swatch.selected {
+        .zen-tidy-tabs-swatch:hover { transform: scale(1.08); }
+        .zen-tidy-tabs-swatch.selected {
           box-shadow: 0 0 0 2px ${v.bg}, 0 0 0 4px var(--swatch);
         }
 
         /* ---- Segmented control ---- */
-        .zentidy-segment {
-          display: inline-flex; padding: 3px; gap: 3px;
+        .zen-tidy-tabs-segment {
+          display: inline-flex; flex-wrap: wrap; padding: 3px; gap: 3px;
           background: ${v.elevated}; border: 1px solid ${v.border};
           border-radius: 10px;
         }
-        .zentidy-seg {
+        .zen-tidy-tabs-seg {
           all: unset; cursor: pointer; padding: 5px 12px; font-size: 12px;
           color: ${v.muted}; border-radius: 7px; text-align: center;
         }
-        .zentidy-seg.active { background: ${v.accent}; color: #fff; }
+        .zen-tidy-tabs-seg.active { background: ${v.accent}; color: #fff; }
 
-        .zentidy-hint { margin: 2px 0 0; font-size: 11px; color: ${v.muted}; }
-        .zentidy-link { color: ${v.accent}; cursor: pointer; text-decoration: underline; }
+        .zen-tidy-tabs-hint { margin: 2px 0 0; font-size: 11px; color: ${v.muted}; }
+        .zen-tidy-tabs-link { color: ${v.accent}; cursor: pointer; text-decoration: underline; }
 
         /* ---- Buttons ---- */
-        .zentidy-btn {
+        .zen-tidy-tabs-btn {
           all: unset; cursor: pointer; padding: 7px 14px; font-size: 13px; font-weight: 600;
           border-radius: 9px; color: ${v.text}; background: ${v.elevated};
           border: 1px solid ${v.border}; text-align: center;
         }
-        .zentidy-btn:hover { filter: brightness(1.12); }
-        .zentidy-btn.primary { background: ${v.accent}; border-color: transparent; color: #fff; }
-        .zentidy-btn.ghost { background: transparent; }
-        .zentidy-btn.danger { background: transparent; border-color: transparent; color: #e26d6d; }
-        .zentidy-btn.danger:hover { background: rgba(226,109,109,.14); filter: none; }
+        .zen-tidy-tabs-btn:hover { filter: brightness(1.12); }
+        .zen-tidy-tabs-btn.primary { background: ${v.accent}; border-color: transparent; color: #fff; }
+        .zen-tidy-tabs-btn.ghost { background: transparent; }
+        .zen-tidy-tabs-btn.danger { background: transparent; border-color: transparent; color: #e26d6d; }
+        .zen-tidy-tabs-btn.danger:hover { background: rgba(226,109,109,.14); filter: none; }
+
+        /* ---- Inline group rename ---- */
+        .tab-group-label.zen-tidy-tabs-inline-editing {
+          outline: 1px solid ${v.accent} !important;
+          outline-offset: 1px;
+          border-radius: 5px;
+          cursor: text;
+          -moz-user-select: text;
+          user-select: text;
+        }
 
         ${styles.labelStyleCss()}
       `;
@@ -943,15 +1357,15 @@
       try {
         const box = gBrowser.getNotificationBox();
         box.appendNotification(
-          "zen-tidy-msg",
+          "zen-tidy-tabs-msg",
           {
-            label: "Zen Tidy: " + message,
+            label: "Zen Tidy Tabs: " + message,
             priority: isError ? box.PRIORITY_WARNING_HIGH : box.PRIORITY_INFO_LOW,
           },
           []
         );
         setTimeout(() => {
-          const note = box.getNotificationWithValue?.("zen-tidy-msg");
+          const note = box.getNotificationWithValue?.("zen-tidy-tabs-msg");
           if (note) box.removeNotification(note);
         }, 6000);
       } catch {
@@ -983,8 +1397,11 @@
         const plan = ai.parseGroups(ai.extractText(data), sourceTabs);
         log("plan:", plan.map((g) => `${g.name}(${g.tabs.length})`).join(", "));
 
+        // apply() reconciles against existing groups in place: groups that
+        // survive keep their position + color, only changed tabs move, and
+        // abandoned groups dissolve. No nesting, minimal disruption.
         groups.apply(plan);
-        groups.removeEmpty();
+        groups.scheduleEmptyCheck();
         orchestrator.notify(`Sorted ${sourceTabs.length} tabs into ${plan.length} groups.`);
       } catch (e) {
         orchestrator.notify("failed: " + (e.message || e), true);
@@ -1080,13 +1497,14 @@
   // styles, and install the group editor.
   // ============================================================================
   const init = () => {
-    log("init — Zen Tidy loading");
+    log("init — Zen Tidy Tabs loading");
     debug("location:", (() => { try { return location.href; } catch { return "?"; } })());
     debug("addTabGroup:", typeof gBrowser.addTabGroup, "| tabs:", gBrowser.tabs.length);
 
     styles.inject();
     editor.install();
-    diag.run();
+    groups.installEmptyWatcher();
+    if (CONFIG.debug) diag.run();
 
     if (!control.mount()) {
       let attempts = 0;
@@ -1101,7 +1519,7 @@
     }
 
     // Manual controls for debugging from the Browser Console.
-    win.zenTidy = {
+    win.zenTidyTabs = {
       run: () => orchestrator.runTidy(),
       settings: () => ui.settings(),
       mount: () => control.mount(),
