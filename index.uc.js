@@ -1,10 +1,9 @@
 // ==UserScript==
 // @name           Zen Tidy Tabs
 // @description    Arc-style AI tab tidying integrated into Zen's native sidebar.
-//                 Adds a hover-reveal "Tidy" control next to Zen's Clear button.
-//                 Clicking it asks an LLM (via OpenRouter) to cluster the open
-//                 tabs, then builds native Zen tab groups. Double-click a group
-//                 label to rename / recolor it.
+//                 A hover-reveal "Tidy" control clusters the open tabs via an
+//                 LLM (OpenRouter) into native Zen tab groups. Double-click a
+//                 group label to rename / recolor it.
 // @author         PCOffline
 // @include        main
 // ==/UserScript==
@@ -13,29 +12,33 @@
   "use strict";
 
   // ============================================================================
-  // Configuration — everything tweakable lives here.
+  // Configuration — every tweakable value lives here.
   // ============================================================================
   const CONFIG = {
     debug: false,
 
+    // Preference keys (Services.prefs / about:config).
     prefs: {
-      apiKey: "zen-tidy-tabs.apikey",     // OpenRouter key (sk-or-v1-...)
-      model: "zen-tidy-tabs.model",        // optional model slug override
-      labelStyle: "zen-tidy-tabs.labelstyle", // "filled" | "text"
-      urlMode: "zen-tidy-tabs.urlmode",    // "detailed" | "compact" | "minimal"
+      apiKey: "zen-tidy-tabs.apikey",          // OpenRouter key (sk-or-v1-...)
+      model: "zen-tidy-tabs.model",            // optional model slug override
+      labelStyle: "zen-tidy-tabs.labelstyle",  // "filled" | "text"
+      urlMode: "zen-tidy-tabs.urlmode",        // "detailed" | "compact" | "minimal"
     },
+
     api: {
       endpoint: "https://openrouter.ai/api/v1/chat/completions",
       defaultModel: "openai/gpt-4o-mini",
-      maxTokens: 2048,      // floor; scaled up with tab count (see ai.request)
+      maxTokens: 2048,                 // floor; scaled up with tab count
       maxTokensCeiling: 8192,
-      temperature: 0.2,     // low → stable, repeatable clustering
-      seed: 7,              // passed through to providers that support it
-      timeoutMs: 90000,     // abort a hung request instead of locking the button
-      // Sent as OpenRouter attribution headers.
-      referer: "https://github.com/PCOffline/zen-tidy-tabs",
+      tokensPerTab: 24,                // max_tokens grows by this per tab...
+      tokensBuffer: 256,               // ...plus this fixed buffer
+      temperature: 0.2,                // low → stable, repeatable clustering
+      seed: 7,
+      timeoutMs: 90000,                // abort a hung request
+      errorBodyMaxChars: 300,          // truncate HTTP error bodies in logs
+      outputPreviewMaxChars: 200,      // truncate unparseable model output in logs
+      referer: "https://github.com/PCOffline/zen-tidy-tabs", // OpenRouter attribution
       title: "Zen Tidy Tabs",
-      // Offered as quick suggestions in the settings modal.
       suggestedModels: [
         "openai/gpt-4o-mini",
         "openai/gpt-4.1-mini",
@@ -49,8 +52,8 @@
       styleId: "zen-tidy-tabs-style",
       label: "🧹 Tidy",
       busyLabel: "↻ Tidying…",
-      // Display approximations of the 9 native group colors (the picker is
-      // limited to these because Firefox tab groups only accept named colors).
+      // Display approximations of the 9 native group colors (Firefox tab groups
+      // only accept these named colors).
       swatchHex: {
         blue: "#4983f0",
         red: "#d8453b",
@@ -66,42 +69,37 @@
 
     grouping: {
       colors: ["blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange", "gray"],
-      minTabs: 3, // refuse to tidy fewer than this
+      minTabs: 3,              // refuse to tidy fewer than this
+      minGroups: 2,            // lower bound for the model's group cap
+      maxGroups: 8,            // upper bound for the model's group cap
+      targetTabsPerGroup: 3,   // group cap scales as ceil(tabCount / this)
     },
 
     snapshot: {
-      titleMax: 160, // truncate long titles before sending to the model
-      urlMax: 120,   // truncate long URLs too
+      titleMax: 160,  // truncate long titles before sending to the model
+      urlMax: 120,    // truncate long URLs too
+    },
+
+    // Timing constants in ms (counts where noted) for debounces, polling, retries.
+    timing: {
+      doubleClickMs: 300,            // single- vs double-click disambiguation window
+      emptyCheckDelayMs: 80,         // delay before the first empty-group sweep
+      emptyCheckIntervalMs: 150,     // interval between empty-group sweeps
+      emptyCheckMaxTries: 6,         // number of empty-group sweeps per schedule
+      emptyWatcherDebounceMs: 500,   // debounce for the drag-driven empty watcher
+      notifyDurationMs: 6000,        // how long a notification stays up
+      mountRetryMs: 250,             // interval between mount attempts
+      mountMaxAttempts: 40,          // give up mounting after this many attempts
     },
   };
 
   // ============================================================================
-  // Logging — one consistent, scoped logger for the whole script.
-  //
-  // Every line is tagged "[Zen Tidy Tabs] [<step>]" so both its origin and the
-  // stage it belongs to are obvious in the Browser Console. Severity maps to the
-  // matching console method, and verbose tracing is routed through console.debug
-  // — emitted only when CONFIG.debug is on (toggle it at the top of this file).
-  //
-  //   .info(…)   lifecycle / outcome messages worth seeing every run
-  //   .warn(…)   recoverable problems and unexpected-but-handled states
-  //   .error(…)  failures the user should know about
-  //   .debug(…)  step-by-step tracing for diagnosing issues (CONFIG.debug only)
-  //
-  // Steps (named stages of the script's life):
-  //   init    bootstrap, environment resolution, lifecycle
-  //   config  reading / writing preferences
-  //   dom     locating Zen's sidebar and mounting the Tidy control
-  //   styles  injecting our stylesheet
-  //   ai      OpenRouter request / response handling
-  //   groups  creating, reconciling and cleaning up native tab groups
-  //   tidy    the end-to-end "tidy my tabs" run
-  //   events  user interactions (rename, recolor, settings, close)
-  //   diag    one-shot DOM diagnostics
+  // Logging — one scoped logger per stage. Every line is tagged
+  // "[Zen Tidy Tabs] [<stage>]"; .debug output is silenced unless CONFIG.debug.
   // ============================================================================
   const PREFIX = "[Zen Tidy Tabs]";
-  const makeLogger = (step) => {
-    const tag = `${PREFIX} [${step}]`;
+  const makeLogger = (stage) => {
+    const tag = `${PREFIX} [${stage}]`;
     return {
       info: (...args) => console.info(tag, ...args),
       warn: (...args) => console.warn(tag, ...args),
@@ -122,24 +120,22 @@
   };
 
   // ============================================================================
-  // Environment — resolve the chrome window that owns gBrowser exactly once.
-  //
-  // Strategy: prefer the script's own `window`. When the script is pasted into
-  // the Browser Console, `window` may be the console's global (no gBrowser), so
-  // fall back to the most-recent browser window via the window mediator.
+  // Environment — resolve the chrome window that owns gBrowser. Prefer the
+  // script's own `window`; fall back to the most-recent browser window (e.g.
+  // when pasted into the Browser Console, where `window` lacks gBrowser).
   // ============================================================================
   const env = (() => {
-    let win = typeof window !== "undefined" ? window : null;
-    if (!win || !win.gBrowser) {
+    let browserWindow = typeof window !== "undefined" ? window : null;
+    if (!browserWindow?.gBrowser) {
       try {
-        const mru = Services.wm.getMostRecentWindow("navigator:browser");
-        if (mru?.gBrowser) win = mru;
+        const mostRecent = Services.wm.getMostRecentWindow("navigator:browser");
+        if (mostRecent?.gBrowser) browserWindow = mostRecent;
       } catch (e) {
         Log.init.error("Could not resolve a browser window via Services.wm; gBrowser is unavailable.", e);
       }
     }
-    return win && win.gBrowser
-      ? { win, doc: win.document, gBrowser: win.gBrowser }
+    return browserWindow?.gBrowser
+      ? { win: browserWindow, doc: browserWindow.document, gBrowser: browserWindow.gBrowser }
       : null;
   })();
 
@@ -155,51 +151,52 @@
   const { win, doc, gBrowser } = env;
 
   // ============================================================================
-  // DOM access — every selector strategy is documented and isolated here, so
-  // that when Zen changes its internals there is exactly one place to update.
+  // Native <tab-group> helpers — one place for reading and writing a group's
+  // name, color and tabs. The label may live on a property or an attribute, and
+  // the tabs may live on `.tabs` or only be queryable.
+  // ============================================================================
+  const TAB_SELECTOR = "tab, .tabbrowser-tab";
+  const normalizeName = (name) => (name || "").trim().toLowerCase();
+  const getGroupName = (el) => (el?.label || el?.getAttribute?.("label") || "").trim();
+  const getGroupColor = (el) => el?.color || el?.getAttribute?.("color") || "";
+  const getGroupTabs = (el) => el.tabs || el.querySelectorAll(TAB_SELECTOR);
+  const setGroupName = (el, name) => { el.label = name; el.setAttribute("label", name); };
+  const setGroupColor = (el, color) => { el.color = color; el.setAttribute("color", color); };
+
+  // ============================================================================
+  // DOM access — every selector strategy is isolated here, so there is exactly
+  // one place to update when Zen changes its internals.
   // ============================================================================
   const dom = {
-    // The active workspace's tab section.
-    //
-    // Strategy: Zen renders one `.zen-workspace-tabs-section` per workspace and
-    // keeps them all in the DOM. The selected tab is always inside the active
-    // one, so we climb from it. Fallbacks: an explicitly-flagged [active]
-    // section, then simply the first section.
+    // The active workspace's tab section. Zen keeps one section per workspace in
+    // the DOM; the selected tab lives in the active one, so climb from it.
     activeSection() {
-      const fromSelected = gBrowser.selectedTab?.closest?.(".zen-workspace-tabs-section");
       return (
-        fromSelected ||
+        gBrowser.selectedTab?.closest?.(".zen-workspace-tabs-section") ||
         doc.querySelector(".zen-workspace-tabs-section[active]") ||
         doc.querySelector(".zen-workspace-tabs-section")
       );
     },
 
-    // Zen's existing "Clear" control (added by another mod / Zen itself).
-    //
-    // Strategy: it has no stable id/class, and it may render its text via a
-    // `label` attribute (XUL toolbarbutton) or a CSS pseudo-element rather than
-    // as text content — so we check all three. Scoped to the tab strip for speed.
+    // Zen's native "Clear" control. It has no stable id/class and may render its
+    // text via a `label` attribute or a CSS pseudo-element, so check all three.
     clearControl() {
       const scopes = [doc.getElementById("tabbrowser-tabs"), dom.activeSection(), doc].filter(Boolean);
       const seen = new Set();
-      const selector =
-        "toolbarbutton, button, label, span, hbox, vbox, toolbaritem, [label], [tooltiptext]";
+      const selector = "toolbarbutton, button, label, span, hbox, vbox, toolbaritem, [label], [tooltiptext]";
+
       for (const scope of scopes) {
         for (const el of scope.querySelectorAll(selector)) {
           if (seen.has(el)) continue;
           seen.add(el);
 
-          const label = (el.getAttribute?.("label") || "").trim().toLowerCase();
-          if (label === "clear") return el;
-
-          const text = (el.textContent || "").trim().toLowerCase();
-          if (text === "clear") return el; // exact, so we never match a big container
+          if ((el.getAttribute?.("label") || "").trim().toLowerCase() === "clear") return el;
+          if ((el.textContent || "").trim().toLowerCase() === "clear") return el;
 
           if (!el.children.length) {
             try {
               for (const pseudo of ["::before", "::after"]) {
-                const content = win.getComputedStyle(el, pseudo).content || "";
-                if (/clear/i.test(content)) return el;
+                if (/clear/i.test(win.getComputedStyle(el, pseudo).content || "")) return el;
               }
             } catch { /* detached node */ }
           }
@@ -208,21 +205,14 @@
       return null;
     },
 
-    // The pinned/normal boundary inside a section = the first normal tab or
-    // tab-group (skipping pinned/essential tabs). Used only for fallback
-    // placement when there is no Clear control to sit beside.
+    // First normal (non-pinned, non-essential) tab or group in a section. Used
+    // as a fallback mount anchor when there's no Clear control to sit beside.
     firstNormalNode(section) {
-      const nodes = section.querySelectorAll("tab-group, tab, .tabbrowser-tab");
-      for (const el of nodes) {
+      for (const el of section.querySelectorAll("tab-group, tab, .tabbrowser-tab")) {
         if (dom.isGroupEl(el)) return el;
         if (!(el.pinned || el.hasAttribute?.("zen-essential"))) return el;
       }
       return null;
-    },
-
-    // The <tab-group> owning a double-clicked label, or null.
-    groupFromEvent(target) {
-      return target?.closest?.(".tab-group-label")?.closest?.("tab-group") || null;
     },
 
     isGroupEl(el) {
@@ -231,7 +221,8 @@
 
     describe(el) {
       if (!el) return "null";
-      return (el.tagName || "?").toLowerCase() + (el.id ? "#" + el.id : "") +
+      return (el.tagName || "?").toLowerCase() +
+        (el.id ? "#" + el.id : "") +
         (el.className ? "." + String(el.className).trim().split(/\s+/)[0] : "");
     },
   };
@@ -255,8 +246,8 @@
     model() { return prefs.get(CONFIG.prefs.model, CONFIG.api.defaultModel); },
     labelStyle() { return prefs.get(CONFIG.prefs.labelStyle, "filled"); },
     urlMode() {
-      const v = prefs.get(CONFIG.prefs.urlMode, "detailed");
-      return ["detailed", "compact", "minimal"].includes(v) ? v : "detailed";
+      const mode = prefs.get(CONFIG.prefs.urlMode, "detailed");
+      return ["detailed", "compact", "minimal"].includes(mode) ? mode : "detailed";
     },
   };
 
@@ -264,63 +255,48 @@
   // Tabs
   // ============================================================================
   const tabs = {
-    // Tabs in the active workspace that we may organize.
-    //
-    // includeGrouped=false → only ungrouped tabs (e.g. for a status readout).
-    // includeGrouped=true  → every eligible tab, so a re-tidy reconsiders the
-    //                        whole structure (tabs can leave/merge groups).
+    // Eligible tabs in the active workspace. includeGrouped=false → ungrouped
+    // only (status readouts); true → every eligible tab, so a re-tidy can move
+    // tabs between groups.
     collect(includeGrouped) {
       const workspaceId = win.gZenWorkspaces?.activeWorkspace ?? null;
-      return gBrowser.tabs.filter((t) => {
-        if (t.pinned || t.hidden || t.closing) return false;
-        if (!includeGrouped && t.group) return false;
-        if (t.hasAttribute("zen-empty-tab") || t.hasAttribute("zen-glance-tab")) return false;
-        const tabWorkspace = t.getAttribute("zen-workspace-id");
+      return gBrowser.tabs.filter((tab) => {
+        if (tab.pinned || tab.hidden || tab.closing) return false;
+        if (!includeGrouped && tab.group) return false;
+        if (tab.hasAttribute("zen-empty-tab") || tab.hasAttribute("zen-glance-tab")) return false;
+        const tabWorkspace = tab.getAttribute("zen-workspace-id");
         if (workspaceId && tabWorkspace && tabWorkspace !== workspaceId) return false;
         return true;
       });
     },
 
-    // A tab is still usable if it hasn't been closed during the async API call.
-    isAlive(t) {
-      return t && !t.closing && t.isConnected && gBrowser.tabs.includes(t);
+    // A tab is usable only if it wasn't closed during the async API call.
+    isAlive(tab) {
+      return tab && !tab.closing && tab.isConnected && gBrowser.tabs.includes(tab);
     },
 
-    title(t) { return (t.label || "").slice(0, CONFIG.snapshot.titleMax); },
-    rawUrl(t) { return t.linkedBrowser?.currentURI?.spec || ""; },
+    title(tab) { return (tab.label || "").slice(0, CONFIG.snapshot.titleMax); },
 
-    // Build the URL string sent for a tab, per the user's detail preference.
-    // The query string and hash are ALWAYS stripped (never sent to the model):
-    //   detailed → title + domain + path     (default)
-    //   compact  → title + hostname only
-    //   minimal  → title only (no URL at all)
+    // The URL string sent for a tab, per the user's privacy preference. Query
+    // and hash are always stripped:
+    //   detailed → domain + path (default)   compact → hostname   minimal → none
     formatUrl(spec, mode) {
       if (!spec || mode === "minimal") return "";
       if (mode === "compact") {
         try { return new win.URL(spec).hostname; } catch { return ""; }
       }
-      // detailed: drop ?query and #hash; works for http(s), about:, chrome:, etc.
       return spec.split("?")[0].split("#")[0].slice(0, CONFIG.snapshot.urlMax);
     },
 
-    // The name of the group a tab currently lives in, or "" if ungrouped.
-    groupName(t) {
-      const g = t.group;
-      if (!g) return "";
-      return (g.label || g.getAttribute?.("label") || "").trim();
-    },
-
-    // Compact [{i, title, url?, group?}] list for the model. `url` honors the
-    // user's privacy mode (omitted entirely in "title" mode); `group` is only
-    // included when the tab is already grouped, so a re-tidy can keep stable
-    // groupings instead of reinventing names every run.
+    // Compact [{i, title, url?, group?}] list for the model. `group` is included
+    // only for already-grouped tabs, so a re-tidy can keep stable groupings.
     snapshot(list) {
       const mode = prefs.urlMode();
-      return list.map((t, i) => {
-        const entry = { i, title: tabs.title(t) };
-        const url = tabs.formatUrl(tabs.rawUrl(t), mode);
+      return list.map((tab, i) => {
+        const entry = { i, title: tabs.title(tab) };
+        const url = tabs.formatUrl(tab.linkedBrowser?.currentURI?.spec || "", mode);
         if (url) entry.url = url;
-        const group = tabs.groupName(t);
+        const group = getGroupName(tab.group);
         if (group) entry.group = group;
         return entry;
       });
@@ -331,22 +307,23 @@
   // AI categorization
   // ============================================================================
   const ai = {
-    // The prompt encodes an opinionated stance on what a *good* grouping is,
-    // a naming rubric, hard constraints, an output contract, and one worked
-    // example — so even small/cheap models produce consistent, clean JSON.
+    // The prompt encodes what a good grouping is, a naming rubric, hard
+    // constraints, an output contract, and worked examples — so even small,
+    // cheap models produce consistent, clean JSON.
     buildPrompt(snapshot) {
-      const n = snapshot.length;
-      const lastIndex = n - 1;
-      // Allow a single group when everything shares a theme; cap groups so we
-      // never shatter a small workspace into many singletons.
-      const cap = Math.min(8, Math.max(2, Math.ceil(n / 3)));
-      const hasGroups = snapshot.some((t) => t.group);
+      const tabCount = snapshot.length;
+      const lastIndex = tabCount - 1;
+      const maxGroups = Math.min(
+        CONFIG.grouping.maxGroups,
+        Math.max(CONFIG.grouping.minGroups, Math.ceil(tabCount / CONFIG.grouping.targetTabsPerGroup))
+      );
+      const hasGroups = snapshot.some((tab) => tab.group);
       return [
         `You are "Tidy", an engine that organizes a browser sidebar's open tabs`,
         `into a small set of clean, intuitive groups — like Arc's "Tidy Tabs".`,
         ``,
         `## Input`,
-        `${n} tabs. Each object has {"i": <index 0-${lastIndex}>, "title": <string>}`,
+        `${tabCount} tabs. Each object has {"i": <index 0-${lastIndex}>, "title": <string>}`,
         `and may also include "url": <string> and "group": <string> (the name of`,
         `the group the tab is CURRENTLY in). Treat "group" as a strong hint, not a`,
         `command. Use whatever fields are present; the title is always the primary signal.`,
@@ -387,7 +364,7 @@
         `  fold it into the closest genuinely-related group.`,
         ``,
         `## Hard constraints (must all hold)`,
-        `1. Produce between 1 and ${cap} groups (1 is fine if every tab shares one theme).`,
+        `1. Produce between 1 and ${maxGroups} groups (1 is fine if every tab shares one theme).`,
         `2. Every index 0-${lastIndex} appears in EXACTLY ONE group.`,
         `   Never skip an index, never repeat one, never invent one out of range.`,
         `3. Output ONLY a single JSON object matching the schema — no prose,`,
@@ -408,18 +385,17 @@
     },
 
     async request(snapshot, apiKey, model) {
-      const n = snapshot.length;
-      const max_tokens = Math.min(
+      const maxTokens = Math.min(
         CONFIG.api.maxTokensCeiling,
-        Math.max(CONFIG.api.maxTokens, n * 24 + 256)
+        Math.max(CONFIG.api.maxTokens, snapshot.length * CONFIG.api.tokensPerTab + CONFIG.api.tokensBuffer)
       );
       const body = {
         model,
         temperature: CONFIG.api.temperature,
         seed: CONFIG.api.seed,
-        max_tokens,
-        // Ask the provider to guarantee a JSON object. Hugely improves
-        // reliability; we degrade gracefully if a model rejects it.
+        max_tokens: maxTokens,
+        // Ask the provider to guarantee a JSON object; we degrade gracefully if
+        // a model rejects it (see the retry below).
         response_format: { type: "json_object" },
         messages: [
           {
@@ -435,13 +411,13 @@
       };
 
       try {
-        return await ai._post(body, apiKey);
+        return await ai.post(body, apiKey);
       } catch (e) {
         // Some models/providers reject response_format. Retry once without it.
         if (e?.status === 400 && /response_format|json/i.test(e.message || "")) {
           Log.ai.warn(`Model "${body.model}" rejected response_format=json_object (HTTP 400); retrying once without it.`);
           delete body.response_format;
-          return await ai._post(body, apiKey);
+          return await ai.post(body, apiKey);
         }
         throw e;
       }
@@ -449,13 +425,14 @@
 
     // POST to OpenRouter with a hard timeout so a hung request can never lock
     // the Tidy button indefinitely.
-    async _post(body, apiKey) {
+    async post(body, apiKey) {
       Log.ai.debug(`Requesting completion from OpenRouter (model: ${body.model}, max_tokens: ${body.max_tokens}, timeout: ${CONFIG.api.timeoutMs}ms).`);
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), CONFIG.api.timeoutMs);
-      let res;
+
+      let response;
       try {
-        res = await fetch(CONFIG.api.endpoint, {
+        response = await fetch(CONFIG.api.endpoint, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -477,15 +454,15 @@
         clearTimeout(timer);
       }
 
-      Log.ai.debug(`OpenRouter responded with HTTP ${res.status}${res.statusText ? " " + res.statusText : ""}.`);
-      if (!res.ok) {
-        const detail = (await res.text()).slice(0, 300);
-        Log.ai.error(`OpenRouter request failed with HTTP ${res.status}. Response body (truncated to 300 chars): ${detail}`);
-        const err = new Error(`OpenRouter ${res.status}: ${detail}`);
-        err.status = res.status;
-        throw err;
+      Log.ai.debug(`OpenRouter responded with HTTP ${response.status}${response.statusText ? " " + response.statusText : ""}.`);
+      if (!response.ok) {
+        const detail = (await response.text()).slice(0, CONFIG.api.errorBodyMaxChars);
+        Log.ai.error(`OpenRouter request failed with HTTP ${response.status}. Response body (truncated): ${detail}`);
+        const error = new Error(`OpenRouter ${response.status}: ${detail}`);
+        error.status = response.status;
+        throw error;
       }
-      return res.json();
+      return response.json();
     },
 
     // Pull the assistant text out of an OpenRouter/OpenAI response, tolerating
@@ -496,6 +473,7 @@
         Log.ai.error("OpenRouter returned an error payload:", detail);
         throw new Error("API error: " + detail);
       }
+
       const message = data.choices?.[0]?.message;
       let content = message?.content;
       if (Array.isArray(content)) {
@@ -516,28 +494,30 @@
           "(e.g. openai/gpt-4o-mini) instead of a free/reasoning router."
         );
       }
+      // Strip a stray ```json fence if the model wrapped its JSON.
       return content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
     },
 
     // Parse the model's text into validated [{name, tabs:[<tabEl>]}] groups,
-    // mapping indices back to real tab elements and guaranteeing each tab is
-    // used at most once. Any tab the model omitted lands in a trailing "Misc".
+    // mapping indices back to real tab elements and using each tab at most once.
+    // Any tab the model omitted lands in a trailing "Misc" group.
     parseGroups(text, sourceTabs) {
+      const preview = () => text.slice(0, CONFIG.api.outputPreviewMaxChars);
       let parsed;
       try {
         parsed = JSON.parse(text);
       } catch {
-        Log.ai.debug("Completion was not strict JSON; attempting to extract the first {…} block.");
+        Log.ai.debug("Completion was not strict JSON; extracting the first {…} block.");
         const match = text.match(/\{[\s\S]*\}/);
         if (!match) {
-          Log.ai.error("Could not extract any JSON object from the model output (truncated to 200 chars):", text.slice(0, 200));
-          throw new Error("Could not parse model output: " + text.slice(0, 200));
+          Log.ai.error("Could not extract any JSON object from the model output (truncated):", preview());
+          throw new Error("Could not parse model output: " + preview());
         }
         parsed = JSON.parse(match[0]);
       }
 
       const used = new Set();
-      const groups = [];
+      const result = [];
       const groupList = Array.isArray(parsed?.groups) ? parsed.groups : [];
       for (const group of groupList) {
         const members = [];
@@ -548,16 +528,16 @@
             members.push(tab);
           }
         }
-        if (members.length) groups.push({ name: group.name || "Group", tabs: members });
+        if (members.length) result.push({ name: group.name || "Group", tabs: members });
       }
 
-      const missed = sourceTabs.filter((_, i) => !used.has(i));
-      if (missed.length) {
-        Log.ai.debug(`Model left ${missed.length} tab(s) ungrouped; collecting them into a "Misc" group.`);
-        groups.push({ name: "Misc", tabs: missed });
+      const ungrouped = sourceTabs.filter((_, i) => !used.has(i));
+      if (ungrouped.length) {
+        Log.ai.debug(`Model left ${ungrouped.length} tab(s) ungrouped; collecting them into a "Misc" group.`);
+        result.push({ name: "Misc", tabs: ungrouped });
       }
-      Log.ai.debug(`Parsed model output into ${groups.length} group(s) covering ${used.size + missed.length} tab(s).`);
-      return groups;
+      Log.ai.debug(`Parsed model output into ${result.length} group(s) covering ${used.size + ungrouped.length} tab(s).`);
+      return result;
     },
   };
 
@@ -565,19 +545,23 @@
   // Native Zen tab groups
   // ============================================================================
   const groups = {
-    // Normalize a group name for matching existing groups across a re-tidy.
-    norm(name) { return (name || "").trim().toLowerCase(); },
-
     // Create one fresh native group from `members`. To guarantee the new group
-    // is never NESTED inside another, any member that currently lives in a
-    // group is first pulled out to the top level (gBrowser.ungroupTab), so the
-    // insertBefore anchor is always a top-level tab.
+    // is never NESTED, any member already in a group is first pulled out to the
+    // top level so the insertBefore anchor is always a top-level tab.
     create(members, label, color) {
       if (typeof gBrowser.ungroupTab === "function") {
-        for (const t of members) {
-          if (t.group) { try { gBrowser.ungroupTab(t); } catch (e) { Log.groups.debug("Failed to detach a tab from its current group before regrouping:", e?.message); } }
+        for (const tab of members) {
+          if (!tab.group) continue;
+          try {
+            gBrowser.ungroupTab(tab);
+          } catch (e) {
+            Log.groups.debug("Failed to detach a tab from its current group before regrouping:", e?.message);
+          }
         }
       }
+
+      // Try a few option shapes: some builds ignore insertBefore or require
+      // isUserTriggered. The first that doesn't throw wins.
       const anchor = members[0];
       const attempts = [
         { label, color, insertBefore: anchor },
@@ -590,8 +574,8 @@
           // Some builds ignore the label/color options; set them explicitly.
           if (group) {
             try {
-              if (label) group.label = label;
-              if (color) group.color = color;
+              if (label) setGroupName(group, label);
+              if (color) setGroupColor(group, color);
             } catch { /* non-fatal */ }
           }
           return true;
@@ -603,109 +587,90 @@
       return false;
     },
 
-    // Map of normalized group-name -> group element in the active workspace.
+    // Map of normalized group-name → group element in the active workspace.
     existingByName() {
       const map = new Map();
       const section = dom.activeSection() || doc;
       for (const groupEl of section.querySelectorAll("tab-group")) {
-        const key = groups.norm(groupEl.label || groupEl.getAttribute?.("label"));
+        const key = normalizeName(getGroupName(groupEl));
         if (key && !map.has(key)) map.set(key, groupEl);
       }
       return map;
     },
 
-    // Map of existing group-name -> color, used by the recreate() fallback.
-    colorByName() {
-      const map = {};
-      for (const [, groupEl] of groups.existingByName()) {
-        const name = (groupEl.label || groupEl.getAttribute?.("label") || "").trim();
-        const color = groupEl.color || groupEl.getAttribute?.("color") || "";
-        if (name && color && !(name in map)) map[name] = color;
-      }
-      return map;
-    },
-
-    // Can we move tabs between groups in place? (Modern Zen/Firefox.)
-    canReconcile(existing) {
-      for (const [, el] of existing) {
-        return typeof el.addTabs === "function" && typeof gBrowser.ungroupTab === "function";
-      }
-      return true; // no existing groups → everything is a fresh create anyway
-    },
-
-    // Apply the model's plan. Dispatches to an in-place reconcile (preferred,
-    // minimal disruption) or a flatten+rebuild fallback for older builds.
+    // Apply the model's plan by reconciling against existing groups in place:
+    // groups whose name survives keep their position + color, only changed tabs
+    // move, and abandoned groups dissolve. No nesting, minimal disruption.
     apply(plan) {
       if (typeof gBrowser.addTabGroup !== "function") {
         throw new Error("gBrowser.addTabGroup is unavailable in this Zen build.");
       }
       const section = dom.activeSection() || doc;
       const existing = groups.existingByName();
-      // Snapshot the group elements that existed BEFORE we touch anything, so we
-      // can evict the ones the plan empties out (see below).
+      // Snapshot the groups that existed BEFORE we touch anything, so we can
+      // evict the ones the plan empties out (see below).
       const before = [...section.querySelectorAll("tab-group")];
-      if (groups.canReconcile(existing)) groups.reconcile(plan, existing);
-      else groups.recreate(plan, groups.colorByName());
 
-      // Evict any pre-existing group the plan emptied out: every group in the
-      // recreate() flatten+rebuild, or a group reconcile() abandoned/renamed.
-      // Native dissolve is animated AND deferred, so without this the empty husk
-      // keeps painting beneath the freshly built group for a frame -- the
-      // "two groups stacked on top of each other" re-tidy flicker.
-      //
-      // Only touch elements that existed before (never the ones we just built)
-      // and that hold no live tab. Emptiness is read from the live DOM, not the
-      // group's own `.tabs` list, because that list can lag a frame behind a
-      // reparent and would make us skip a husk that is already visually empty.
-      // removeTabGroup() does the proper native teardown; the follow-up remove()
-      // forces the element out synchronously so no dissolve animation can keep
-      // it on screen. scheduleEmptyCheck() still backstops anything that only
-      // empties once a native tab-close animation settles.
+      groups.reconcile(plan, existing);
+
+      // Synchronously remove any pre-existing group the plan emptied out. Native
+      // dissolve is animated AND deferred, so without this an empty husk keeps
+      // painting beneath the freshly built group for a frame (the re-tidy "two
+      // stacked groups" flicker). Emptiness is read from the live DOM, not the
+      // group's own `.tabs` list, which can lag a frame behind a reparent.
       for (const el of before) {
         if (!el.isConnected) continue;
-        if ([...el.querySelectorAll("tab, .tabbrowser-tab")].some(tabs.isAlive)) continue;
-        try { gBrowser.removeTabGroup?.(el); } catch (e) { Log.groups.debug("removeTabGroup failed while evicting an emptied group:", e?.message); }
-        if (el.isConnected) { try { el.remove(); } catch { /* already detached */ } }
+        if ([...el.querySelectorAll(TAB_SELECTOR)].some(tabs.isAlive)) continue;
+        try {
+          gBrowser.removeTabGroup?.(el);
+        } catch (e) {
+          Log.groups.debug("removeTabGroup failed while evicting an emptied group:", e?.message);
+        }
+        if (el.isConnected) {
+          try { el.remove(); } catch { /* already detached */ }
+        }
       }
     },
 
     // In-place reconcile against current groups. Groups whose name survives are
     // KEPT in place (position + color preserved); only the tabs that actually
     // changed are moved. Genuinely new groups are created; groups the plan
-    // abandoned empty out and dissolve. This keeps the sidebar stable when the
-    // change is minor, while still letting categories broaden or reorganize.
+    // abandoned empty out and dissolve.
     reconcile(plan, existing) {
-      const usedColors = new Set();
       const matched = new Set();
-      let colorIndex = 0;
-
-      const pickColor = () => {
-        const palette = CONFIG.grouping.colors;
-        let c;
-        do { c = palette[colorIndex++ % palette.length]; }
-        while (usedColors.has(c) && colorIndex <= palette.length);
-        return c;
+      const usedColors = new Set();
+      const palette = CONFIG.grouping.colors;
+      let paletteIndex = 0;
+      const nextColor = () => {
+        let color;
+        do { color = palette[paletteIndex++ % palette.length]; }
+        while (usedColors.has(color) && paletteIndex <= palette.length);
+        usedColors.add(color);
+        return color;
       };
 
       for (const group of plan) {
         const live = group.tabs.filter(tabs.isAlive);
         const dropped = group.tabs.length - live.length;
         if (dropped) Log.groups.warn(`Group "${group.name}": ${dropped} tab(s) were closed during the tidy and will be skipped.`);
-        if (!live.length) { Log.groups.debug(`Group "${group.name}" has no live tabs after filtering; skipping.`); continue; }
+        if (!live.length) {
+          Log.groups.debug(`Group "${group.name}" has no live tabs after filtering; skipping.`);
+          continue;
+        }
 
-        const el = existing.get(groups.norm(group.name));
+        const el = existing.get(normalizeName(group.name));
         if (el && typeof el.addTabs === "function") {
           // Keep this group in place; move in only the tabs not already here.
           matched.add(el);
-          usedColors.add(el.color || el.getAttribute?.("color") || "");
-          const toAdd = live.filter((t) => t.group !== el);
+          usedColors.add(getGroupColor(el));
+          const toAdd = live.filter((tab) => tab.group !== el);
           if (toAdd.length) {
             Log.groups.debug(`Reusing existing group "${group.name}" in place; adding ${toAdd.length} tab(s).`);
-            try { el.addTabs(toAdd); } catch (e) { Log.groups.warn(`Failed to add tabs to existing group "${group.name}".`, e); }
+            try { el.addTabs(toAdd); }
+            catch (e) { Log.groups.warn(`Failed to add tabs to existing group "${group.name}".`, e); }
           }
         } else {
-          const color = pickColor();
-          usedColors.add(color);
+          const color = nextColor();
           Log.groups.debug(`Creating new group "${group.name}" with ${live.length} tab(s) (color: ${color}).`);
           groups.create(live, group.name, color);
         }
@@ -714,60 +679,22 @@
       // Any existing group the plan didn't reuse has had its tabs pulled into
       // other groups; dissolve whatever is left so it doesn't linger.
       for (const [, el] of existing) {
-        if (matched.has(el)) continue;
-        if (groups.hasLiveTabs(el)) {
-          try { el.ungroupTabs?.(); } catch (e) { Log.groups.warn(`Failed to dissolve the abandoned group "${el.label || el.getAttribute?.("label") || "?"}".`, e); }
-        }
-      }
-    },
-
-    // Fallback for builds without in-place moves: flatten everything, then
-    // build groups fresh, preserving colors for names that survive.
-    recreate(plan, prevColors = {}) {
-      groups.flattenAll();
-      let colorIndex = 0;
-      const usedColors = new Set();
-      for (const group of plan) {
-        const live = group.tabs.filter(tabs.isAlive);
-        if (!live.length) continue;
-        let color = prevColors[group.name];
-        if (!color || usedColors.has(color)) {
-          const palette = CONFIG.grouping.colors;
-          do { color = palette[colorIndex++ % palette.length]; }
-          while (usedColors.has(color) && colorIndex <= palette.length);
-        }
-        usedColors.add(color);
-        groups.create(live, group.name, color);
-      }
-    },
-
-    // Dissolve every existing group in the active workspace, keeping their tabs
-    // (recreate() fallback only).
-    flattenAll() {
-      const section = dom.activeSection() || doc;
-      for (const groupEl of [...section.querySelectorAll("tab-group")]) {
-        try {
-          if (typeof groupEl.ungroupTabs === "function") groupEl.ungroupTabs();
-          else if (typeof gBrowser.ungroupTab === "function") {
-            for (const t of [...(groupEl.tabs || groupEl.querySelectorAll("tab, .tabbrowser-tab"))]) {
-              gBrowser.ungroupTab(t);
-            }
-          }
-        } catch (e) {
-          Log.groups.warn("Failed to flatten a tab group during the rebuild fallback.", e);
-        }
+        if (matched.has(el) || !groups.hasLiveTabs(el)) continue;
+        try { el.ungroupTabs?.(); }
+        catch (e) { Log.groups.warn(`Failed to dissolve the abandoned group "${getGroupName(el) || "?"}".`, e); }
       }
     },
 
     // Is a group element holding at least one tab that isn't closing?
     hasLiveTabs(groupEl) {
-      const list = groupEl.tabs || groupEl.querySelectorAll("tab, .tabbrowser-tab");
-      for (const t of list) { if (tabs.isAlive(t)) return true; }
+      for (const tab of getGroupTabs(groupEl)) {
+        if (tabs.isAlive(tab)) return true;
+      }
       return false;
     },
 
-    // Dissolve any group left empty (after a re-tidy, a close, or a manual
-    // drag moved its last tab out). Scoped to the active workspace.
+    // Dissolve any group left empty (after a re-tidy, a close, or a manual drag
+    // moved its last tab out). Scoped to the active workspace.
     removeEmpty() {
       const section = dom.activeSection() || doc;
       let removed = 0;
@@ -781,7 +708,8 @@
           else groupEl.remove();
           removed++;
         } catch (e) {
-          try { groupEl.remove(); removed++; } catch { Log.groups.warn("Could not remove an empty tab group via API or direct DOM removal.", e); }
+          try { groupEl.remove(); removed++; }
+          catch { Log.groups.warn("Could not remove an empty tab group via API or direct DOM removal.", e); }
         }
       }
       if (removed) Log.groups.debug(`Removed ${removed} empty group(s) from the active workspace.`);
@@ -794,9 +722,9 @@
       let tries = 0;
       const tick = () => {
         groups.removeEmpty();
-        if (++tries < 6) setTimeout(tick, 150);
+        if (++tries < CONFIG.timing.emptyCheckMaxTries) setTimeout(tick, CONFIG.timing.emptyCheckIntervalMs);
       };
-      setTimeout(tick, 80);
+      setTimeout(tick, CONFIG.timing.emptyCheckDelayMs);
     },
 
     // Watch the tab strip so groups emptied by native drag-and-drop also get
@@ -808,7 +736,7 @@
       let pending = null;
       const observer = new win.MutationObserver(() => {
         if (pending) return;
-        pending = setTimeout(() => { pending = null; groups.removeEmpty(); }, 500);
+        pending = setTimeout(() => { pending = null; groups.removeEmpty(); }, CONFIG.timing.emptyWatcherDebounceMs);
       });
       observer.observe(root, { childList: true, subtree: true });
       Log.groups.debug("Empty-group watcher installed on", dom.describe(root) + ".");
@@ -816,19 +744,20 @@
 
     // Close every tab in a group (and let the now-empty group dissolve).
     close(groupEl) {
-      const members = [...groupEl.querySelectorAll("tab, .tabbrowser-tab")].filter(tabs.isAlive);
-      Log.groups.debug(`Closing group "${groupEl.label}" and its ${members.length} tab(s).`);
+      const members = [...groupEl.querySelectorAll(TAB_SELECTOR)].filter(tabs.isAlive);
+      Log.groups.debug(`Closing group "${getGroupName(groupEl)}" and its ${members.length} tab(s).`);
       for (const tab of members) {
-        try { gBrowser.removeTab(tab, { animate: true }); } catch (e) { Log.groups.warn("Failed to close a tab while closing a group.", e); }
+        try { gBrowser.removeTab(tab, { animate: true }); }
+        catch (e) { Log.groups.warn("Failed to close a tab while closing a group.", e); }
       }
       groups.scheduleEmptyCheck();
     },
   };
 
   // ============================================================================
-  // mk — tiny DOM builders used by the modals.
+  // DOM builders for the modals.
   // ============================================================================
-  const mk = {
+  const make = {
     el(tag, className, text) {
       const node = doc.createElement(tag);
       if (className) node.className = className;
@@ -836,60 +765,58 @@
       return node;
     },
     field(labelText, control) {
-      const wrap = mk.el("div", "zen-tidy-tabs-field");
-      const label = mk.el("label", "zen-tidy-tabs-label", labelText);
-      wrap.append(label, control);
-      return wrap;
+      const field = make.el("div", "zen-tidy-tabs-field");
+      field.append(make.el("label", "zen-tidy-tabs-label", labelText), control);
+      return field;
     },
     input(value, { type = "text", placeholder = "" } = {}) {
-      const input = mk.el("input", "zen-tidy-tabs-input");
+      const input = make.el("input", "zen-tidy-tabs-input");
       input.type = type;
       input.value = value ?? "";
       if (placeholder) input.placeholder = placeholder;
       return input;
     },
     button(text, variant = "") {
-      return mk.el("button", "zen-tidy-tabs-btn" + (variant ? " " + variant : ""), text);
+      return make.el("button", "zen-tidy-tabs-btn" + (variant ? " " + variant : ""), text);
     },
   };
 
   // ============================================================================
-  // modal — a single themed overlay + panel, styled to match Zen.
+  // Modal — a single themed overlay + panel, styled to match Zen.
   // ============================================================================
   const modal = {
-    _escHandler: null,
+    keyHandler: null,
 
     open(title) {
       modal.close();
 
-      const overlay = mk.el("div", "zen-tidy-tabs-overlay");
+      const overlay = make.el("div", "zen-tidy-tabs-overlay");
       overlay.id = "zen-tidy-tabs-overlay";
-      const panel = mk.el("div", "zen-tidy-tabs-modal");
+
+      const panel = make.el("div", "zen-tidy-tabs-modal");
       panel.setAttribute("role", "dialog");
       panel.setAttribute("aria-modal", "true");
       panel.setAttribute("aria-label", title);
 
-      const header = mk.el("div", "zen-tidy-tabs-modal-header");
-      header.append(mk.el("div", "zen-tidy-tabs-modal-title", title));
-      const closeBtn = mk.el("button", "zen-tidy-tabs-modal-close", "✕");
+      const header = make.el("div", "zen-tidy-tabs-modal-header");
+      header.append(make.el("div", "zen-tidy-tabs-modal-title", title));
+      const closeBtn = make.el("button", "zen-tidy-tabs-modal-close", "✕");
       closeBtn.setAttribute("aria-label", "Close");
       closeBtn.addEventListener("click", modal.close);
       header.append(closeBtn);
 
-      const body = mk.el("div", "zen-tidy-tabs-modal-body");
-      const footer = mk.el("div", "zen-tidy-tabs-modal-footer");
-
+      const body = make.el("div", "zen-tidy-tabs-modal-body");
+      const footer = make.el("div", "zen-tidy-tabs-modal-footer");
       panel.append(header, body, footer);
       overlay.append(panel);
 
-      // Click outside the panel, or Escape, closes the modal.
+      // Click outside the panel, or Escape, closes the modal; Tab stays trapped.
       overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) modal.close(); });
-      modal._escHandler = (e) => {
-        if (e.key === "Escape") { modal.close(); return; }
-        // Keep Tab focus trapped inside the panel.
-        if (e.key === "Tab") modal._trapTab(e, panel);
+      modal.keyHandler = (e) => {
+        if (e.key === "Escape") modal.close();
+        else if (e.key === "Tab") modal.trapFocus(e, panel);
       };
-      doc.addEventListener("keydown", modal._escHandler, true);
+      doc.addEventListener("keydown", modal.keyHandler, true);
 
       (doc.documentElement || doc.body).appendChild(overlay);
       requestAnimationFrame(() => overlay.classList.add("open"));
@@ -898,11 +825,12 @@
 
     // Cycle focus among the panel's focusable elements instead of escaping to
     // the underlying chrome.
-    _trapTab(e, panel) {
+    trapFocus(e, panel) {
       const focusable = [...panel.querySelectorAll(
         "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"
       )].filter((el) => !el.disabled && el.offsetParent !== null);
       if (!focusable.length) return;
+
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
       const active = doc.activeElement;
@@ -916,24 +844,25 @@
     },
 
     close() {
-      if (modal._escHandler) {
-        doc.removeEventListener("keydown", modal._escHandler, true);
-        modal._escHandler = null;
+      if (modal.keyHandler) {
+        doc.removeEventListener("keydown", modal.keyHandler, true);
+        modal.keyHandler = null;
       }
       doc.getElementById("zen-tidy-tabs-overlay")?.remove();
     },
   };
 
   // ============================================================================
-  // ui — the actual modal contents (group editor + settings).
+  // Modal contents — group editor + settings.
   // ============================================================================
   const ui = {
-    // A reusable swatch grid bound to the 9 native group colors.
+    // A swatch grid bound to the 9 native group colors. Returns the grid and a
+    // getter for the current selection.
     colorPicker(initial) {
-      const grid = mk.el("div", "zen-tidy-tabs-swatches");
+      const grid = make.el("div", "zen-tidy-tabs-swatches");
       let selected = initial || CONFIG.grouping.colors[0];
       for (const name of CONFIG.grouping.colors) {
-        const swatch = mk.el("button", "zen-tidy-tabs-swatch");
+        const swatch = make.el("button", "zen-tidy-tabs-swatch");
         swatch.style.setProperty("--swatch", CONFIG.ui.swatchHex[name]);
         swatch.title = name;
         if (name === selected) swatch.classList.add("selected");
@@ -947,151 +876,154 @@
       return { grid, get: () => selected };
     },
 
+    // A segmented single-choice control. options = [[value, text], ...].
+    segmentedControl(options, current) {
+      let value = current;
+      const segment = make.el("div", "zen-tidy-tabs-segment");
+      for (const [optionValue, text] of options) {
+        const button = make.el("button", "zen-tidy-tabs-seg", text);
+        if (optionValue === current) button.classList.add("active");
+        button.addEventListener("click", () => {
+          value = optionValue;
+          segment.querySelectorAll(".zen-tidy-tabs-seg").forEach((s) => s.classList.remove("active"));
+          button.classList.add("active");
+        });
+        segment.append(button);
+      }
+      return { el: segment, get: () => value };
+    },
+
     // Edit one group: name + color, with a "Close group" action.
     editGroup(group) {
       const { body, footer } = modal.open("Edit group");
-      Log.user.debug(`Opened the edit modal for group "${group.label}".`);
+      Log.user.debug(`Opened the edit modal for group "${getGroupName(group)}".`);
 
-      const name = mk.input(group.label ?? "", { placeholder: "Group name" });
+      const name = make.input(group.label ?? "", { placeholder: "Group name" });
       const picker = ui.colorPicker(group.color);
+      body.append(make.field("Name", name), make.field("Color", picker.grid));
 
-      body.append(
-        mk.field("Name", name),
-        mk.field("Color", picker.grid)
-      );
-
-      const closeGroup = mk.button("Close group", "danger");
-      closeGroup.addEventListener("click", () => { Log.user.info(`Closing group "${group.label}" via the edit modal.`); groups.close(group); modal.close(); });
-
-      const cancel = mk.button("Cancel", "ghost");
-      cancel.addEventListener("click", modal.close);
-
-      const save = mk.button("Save changes", "primary");
-      save.addEventListener("click", () => {
-        const newName = name.value.trim();
-        try {
-          if (newName) { group.label = newName; group.setAttribute("label", newName); }
-          const color = picker.get();
-          group.color = color;
-          group.setAttribute("color", color);
-          Log.user.info(`Group updated: name="${group.label}", color="${group.color}".`);
-        } catch (e) { Log.user.error("Failed to apply group edits (rename / recolor).", e); }
+      const closeGroup = make.button("Close group", "danger");
+      closeGroup.addEventListener("click", () => {
+        Log.user.info(`Closing group "${getGroupName(group)}" via the edit modal.`);
+        groups.close(group);
         modal.close();
       });
 
-      footer.append(closeGroup, mk.el("div", "zen-tidy-tabs-spacer"), cancel, save);
+      const cancel = make.button("Cancel", "ghost");
+      cancel.addEventListener("click", modal.close);
+
+      const save = make.button("Save changes", "primary");
+      save.addEventListener("click", () => {
+        const newName = name.value.trim();
+        try {
+          if (newName) setGroupName(group, newName);
+          setGroupColor(group, picker.get());
+          Log.user.info(`Group updated: name="${getGroupName(group)}", color="${getGroupColor(group)}".`);
+        } catch (e) {
+          Log.user.error("Failed to apply group edits (rename / recolor).", e);
+        }
+        modal.close();
+      });
+
+      footer.append(closeGroup, make.el("div", "zen-tidy-tabs-spacer"), cancel, save);
       name.focus();
       name.select();
     },
 
-    // App settings: key, model, and label appearance — no about:config needed.
+    // App settings: key, model, label appearance, and what's sent to the AI.
     settings() {
       const { body, footer } = modal.open("Zen Tidy Tabs Settings");
       Log.user.debug("Opened the settings modal.");
 
-      const key = mk.input(prefs.apiKey(), { type: "password", placeholder: "sk-or-v1-..." });
-      const model = mk.input(prefs.model(), { placeholder: CONFIG.api.defaultModel });
+      const key = make.input(prefs.apiKey(), { type: "password", placeholder: "sk-or-v1-..." });
+      const model = make.input(prefs.model(), { placeholder: CONFIG.api.defaultModel });
 
       // Model suggestions via a datalist.
-      const listId = "zen-tidy-tabs-model-list";
-      const datalist = mk.el("datalist");
-      datalist.id = listId;
+      const modelListId = "zen-tidy-tabs-model-list";
+      const datalist = make.el("datalist");
+      datalist.id = modelListId;
       for (const slug of CONFIG.api.suggestedModels) {
-        const opt = mk.el("option");
-        opt.value = slug;
-        datalist.append(opt);
+        const option = make.el("option");
+        option.value = slug;
+        datalist.append(option);
       }
-      model.setAttribute("list", listId);
+      model.setAttribute("list", modelListId);
 
-      // Reusable segmented control: options = [[value, text], ...].
-      const makeSegment = (options, current) => {
-        let value = current;
-        const seg = mk.el("div", "zen-tidy-tabs-segment");
-        for (const [val, text] of options) {
-          const btn = mk.el("button", "zen-tidy-tabs-seg", text);
-          if (val === current) btn.classList.add("active");
-          btn.addEventListener("click", () => {
-            value = val;
-            seg.querySelectorAll(".zen-tidy-tabs-seg").forEach((s) => s.classList.remove("active"));
-            btn.classList.add("active");
-          });
-          seg.append(btn);
-        }
-        return { el: seg, get: () => value };
-      };
-
-      const labelSeg = makeSegment(
+      const labelSegment = ui.segmentedControl(
         [["filled", "Colored"], ["text", "Text only"]],
         prefs.labelStyle()
       );
-
-      const urlSeg = makeSegment(
+      const urlSegment = ui.segmentedControl(
         [["detailed", "Detailed"], ["compact", "Compact"], ["minimal", "Minimal"]],
         prefs.urlMode()
       );
-      const urlHint = mk.el(
+      const urlHint = make.el(
         "p", "zen-tidy-tabs-hint",
         "What each tab sends to the AI — Detailed: title + URL · Compact: title + domain · " +
         "Minimal: title only. Query strings are never sent."
       );
 
-      const hint = mk.el("p", "zen-tidy-tabs-hint");
-      hint.append(doc.createTextNode("Key is stored locally. Get one at "));
-      const link = mk.el("a", "zen-tidy-tabs-link", "openrouter.ai/keys");
+      const keyHint = make.el("p", "zen-tidy-tabs-hint");
+      keyHint.append(doc.createTextNode("Key is stored locally. Get one at "));
+      const link = make.el("a", "zen-tidy-tabs-link", "openrouter.ai/keys");
       link.addEventListener("click", () => win.openTrustedLinkIn?.("https://openrouter.ai/keys", "tab"));
-      hint.append(link, doc.createTextNode("."));
+      keyHint.append(link, doc.createTextNode("."));
 
       body.append(
-        mk.field("OpenRouter API key", key),
-        mk.field("Model", model),
+        make.field("OpenRouter API key", key),
+        make.field("Model", model),
         datalist,
-        mk.field("Group labels", labelSeg.el),
-        mk.field("Tab info sent to AI", urlSeg.el),
+        make.field("Group labels", labelSegment.el),
+        make.field("Tab info sent to AI", urlSegment.el),
         urlHint,
-        hint
+        keyHint
       );
 
-      const cancel = mk.button("Cancel", "ghost");
+      const cancel = make.button("Cancel", "ghost");
       cancel.addEventListener("click", modal.close);
 
-      const save = mk.button("Save settings", "primary");
+      const save = make.button("Save settings", "primary");
       save.addEventListener("click", () => {
         prefs.set(CONFIG.prefs.apiKey, key.value.trim());
         prefs.set(CONFIG.prefs.model, model.value.trim());
-        prefs.set(CONFIG.prefs.labelStyle, labelSeg.get());
-        prefs.set(CONFIG.prefs.urlMode, urlSeg.get());
-        Log.user.info(`Settings saved (model: ${model.value.trim() || CONFIG.api.defaultModel}, labelStyle: ${labelSeg.get()}, urlMode: ${urlSeg.get()}, apiKey: ${key.value.trim() ? "set" : "empty"}).`);
+        prefs.set(CONFIG.prefs.labelStyle, labelSegment.get());
+        prefs.set(CONFIG.prefs.urlMode, urlSegment.get());
+        Log.user.info(`Settings saved (model: ${model.value.trim() || CONFIG.api.defaultModel}, labelStyle: ${labelSegment.get()}, urlMode: ${urlSegment.get()}, apiKey: ${key.value.trim() ? "set" : "empty"}).`);
         styles.inject(); // re-apply label appearance immediately
         modal.close();
         orchestrator.notify("Settings saved.");
       });
 
-      footer.append(mk.el("div", "zen-tidy-tabs-spacer"), cancel, save);
+      footer.append(make.el("div", "zen-tidy-tabs-spacer"), cancel, save);
       key.focus();
     },
   };
 
   // ============================================================================
-  // UI — the Tidy control (a hover-reveal twin of Zen's Clear button)
+  // The Tidy control — a hover-reveal twin of Zen's Clear button.
   // ============================================================================
   const control = {
-    // Build the control. When `twinOf` (the Clear button) is given, clone its
-    // element type and classes so it inherits Clear's look + hover behavior.
-    // Clear may show its text via a `label` attribute (XUL) rather than text
-    // content, so we set both.
-    build(twinOf) {
-      const el = doc.createElement(twinOf ? twinOf.tagName : "span");
+    // Build the control. When `twin` (the Clear button) is given, clone its
+    // element type + classes so it inherits Clear's look and hover behavior.
+    // Clear may show its text via a `label` attribute (XUL), so set both.
+    build(twin) {
+      const el = doc.createElement(twin ? twin.tagName : "span");
       el.id = CONFIG.ui.controlId;
       el.textContent = CONFIG.ui.label;
-      el.setAttribute("label", CONFIG.ui.label); // for XUL toolbarbutton twins
+      el.setAttribute("label", CONFIG.ui.label);
       el.setAttribute("tooltiptext", "Tidy tabs with AI");
       el.title = "Tidy tabs with AI";
-      el.className = twinOf ? twinOf.className : "zen-tidy-tabs-fallback";
-      if (twinOf) el.dataset.twin = "1";
+      el.className = twin ? twin.className : "zen-tidy-tabs-fallback";
+      if (twin) el.dataset.twin = "1";
 
-      const onTidy = (e) => { e.preventDefault(); e.stopPropagation(); Log.user.debug("Tidy control activated (click / command)."); orchestrator.runTidy(); };
-      el.addEventListener("click", onTidy);
-      el.addEventListener("command", onTidy); // XUL buttons fire command
+      const tidy = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        Log.user.debug("Tidy control activated (click / command).");
+        orchestrator.runTidy();
+      };
+      el.addEventListener("click", tidy);
+      el.addEventListener("command", tidy); // XUL buttons fire command
       el.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -1114,9 +1046,9 @@
       return true;
     },
 
-    // Some builds only add the Clear control to the DOM while the separator is
-    // hovered. Watch for that and place the twin the moment Clear appears; the
-    // watcher stays installed so the twin is re-created if Zen rebuilds the row.
+    // Some builds only add the Clear control while the separator is hovered.
+    // Watch for that and place the twin the moment Clear appears; the watcher
+    // stays installed so the twin is re-created if Zen rebuilds the row.
     installClearWatcher() {
       if (win.__zenTidyTabsClearWatcher) return;
       win.__zenTidyTabsClearWatcher = true;
@@ -1127,13 +1059,10 @@
       Log.dom.debug("Clear-button hover watcher installed on", dom.describe(target) + ".");
     },
 
-    // Mount strategy:
-    //   1. twin beside Clear if it's already present;
-    //   2. else a hover-reveal control on the separator (so something works now);
-    //   3. always install the hover watcher to upgrade to a twin when Clear shows.
+    // Mount: twin beside Clear if present; else a hover-reveal fallback on the
+    // separator; always install the watcher to upgrade to a twin when Clear shows.
     mount() {
       control.installClearWatcher();
-
       if (control.placeTwinIfClearPresent()) return true;
 
       if (!doc.getElementById(CONFIG.ui.controlId)) {
@@ -1160,50 +1089,49 @@
   };
 
   // ============================================================================
-  // UI — group label editing.
-  //   single click (settled for 300ms) → inline rename
-  //   double click (2nd click within 300ms) → full edit modal (name + color)
-  // A debounce disambiguates the two so a double-click never leaves the label
+  // Group label editing.
+  //   single click (settled for CONFIG.timing.doubleClickMs) → inline rename
+  //   double click (2nd click within that window)            → full edit modal
+  // The debounce disambiguates the two so a double-click never leaves the label
   // stuck in the inline-edit state.
   // ============================================================================
   const editor = {
-    _clickTimer: null,
-    _editing: null, // { labelEl, group, original, cleanup }
+    clickTimer: null,
+    active: null, // { labelEl, group, original, cleanup }
 
     install() {
       if (win.__zenTidyTabsEditorInstalled) return;
       win.__zenTidyTabsEditorInstalled = true;
 
-      doc.addEventListener(
-        "click",
-        (e) => {
-          const labelEl = e.target?.closest?.(".tab-group-label");
-          if (!labelEl) return;
-          const group = labelEl.closest("tab-group");
-          if (!group) return;
+      doc.addEventListener("click", (e) => {
+        const labelEl = e.target?.closest?.(".tab-group-label");
+        if (!labelEl) return;
+        const group = labelEl.closest("tab-group");
+        if (!group) return;
 
-          // Already editing this label? Let the click position the caret.
-          if (editor._editing && editor._editing.labelEl === labelEl) return;
+        // Already editing this label? Let the click position the caret.
+        if (editor.active?.labelEl === labelEl) return;
 
-          // We own this interaction: block Zen's native click (collapse / its
-          // own inline edit) so single vs double is decided here.
-          e.preventDefault();
-          e.stopPropagation();
+        // We own this interaction: block Zen's native click (collapse / its own
+        // inline edit) so single vs double is decided here.
+        e.preventDefault();
+        e.stopPropagation();
 
-          if (editor._clickTimer) {
-            clearTimeout(editor._clickTimer);
-            editor._clickTimer = null;
-            editor.cancelInline();
-            if (!doc.getElementById("zen-tidy-tabs-overlay")) ui.editGroup(group);
-            return;
-          }
-          editor._clickTimer = setTimeout(() => {
-            editor._clickTimer = null;
-            editor.startInline(group, labelEl);
-          }, 300);
-        },
-        true // capture, so we act before the label's own handler
-      );
+        if (editor.clickTimer) {
+          // Second click within the window → double-click → full edit modal.
+          clearTimeout(editor.clickTimer);
+          editor.clickTimer = null;
+          editor.cancelInline();
+          if (!doc.getElementById("zen-tidy-tabs-overlay")) ui.editGroup(group);
+          return;
+        }
+        // First click → wait to see whether a second one arrives.
+        editor.clickTimer = setTimeout(() => {
+          editor.clickTimer = null;
+          editor.startInline(group, labelEl);
+        }, CONFIG.timing.doubleClickMs);
+      }, true); // capture, so we act before the label's own handler
+
       Log.user.debug("Group label editor installed (single click renames inline, double click opens the edit modal).");
     },
 
@@ -1216,29 +1144,36 @@
       try {
         const range = doc.createRange();
         range.selectNodeContents(labelEl);
-        const sel = win.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
+        const selection = win.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
       } catch { /* selection not critical */ }
 
       const commit = () => {
         const name = (labelEl.textContent || "").trim();
         editor.finishInline();
         if (name && name !== original) {
-          try { group.label = name; group.setAttribute("label", name); Log.user.info(`Renamed group "${original}" to "${name}".`); }
-          catch (e) { Log.user.error(`Failed to rename group "${original}" to "${name}"; restoring the previous name.`, e); labelEl.textContent = original; }
+          try {
+            setGroupName(group, name);
+            Log.user.info(`Renamed group "${original}" to "${name}".`);
+          } catch (e) {
+            Log.user.error(`Failed to rename group "${original}" to "${name}"; restoring the previous name.`, e);
+            labelEl.textContent = original;
+          }
         } else {
           labelEl.textContent = original;
         }
       };
+
       const onKey = (e) => {
         if (e.key === "Enter") { e.preventDefault(); labelEl.blur(); }
         else if (e.key === "Escape") { e.preventDefault(); labelEl.textContent = original; labelEl.blur(); }
         e.stopPropagation();
       };
+
       labelEl.addEventListener("keydown", onKey, true);
       labelEl.addEventListener("blur", commit, { once: true });
-      editor._editing = {
+      editor.active = {
         labelEl,
         group,
         original,
@@ -1247,19 +1182,19 @@
     },
 
     finishInline() {
-      const e = editor._editing;
-      if (!e) return;
-      editor._editing = null;
-      e.cleanup?.();
-      e.labelEl.removeAttribute("contenteditable");
-      e.labelEl.classList.remove("zen-tidy-tabs-inline-editing");
+      const state = editor.active;
+      if (!state) return;
+      editor.active = null;
+      state.cleanup?.();
+      state.labelEl.removeAttribute("contenteditable");
+      state.labelEl.classList.remove("zen-tidy-tabs-inline-editing");
     },
 
     // Abandon an in-progress inline edit, restoring the original name.
     cancelInline() {
-      const e = editor._editing;
-      if (!e) return;
-      e.labelEl.textContent = e.original;
+      const state = editor.active;
+      if (!state) return;
+      state.labelEl.textContent = state.original;
       editor.finishInline();
     },
   };
@@ -1268,8 +1203,8 @@
   // Styles — only our control; groups keep Zen's native appearance.
   // ============================================================================
   const styles = {
-    // CSS variables resolved against Zen's palette, with sane dark fallbacks.
-    vars: {
+    // CSS variables resolved against Zen's palette, with dark fallbacks.
+    theme: {
       bg: "var(--zen-main-browser-background, #1f1e25)",
       elevated: "var(--zen-colors-tertiary, #2a2833)",
       border: "var(--zen-colors-border, #3a3845)",
@@ -1278,10 +1213,9 @@
       accent: "var(--zen-primary-color, #6c5ce7)",
     },
 
-    // Text-only labels: Arc-style. Drop the colored background entirely and
-    // render the name in a neutral, theme-aware color with a bold weight, so
-    // labels never clash with the Zen theme (too dark / too bright). Empty when
-    // the user keeps the default "filled" style.
+    // Text-only labels (Arc-style): drop the colored background and render the
+    // name in a neutral, theme-aware weight. Empty when the default "filled"
+    // style is on.
     labelStyleCss() {
       if (prefs.labelStyle() !== "text") return "";
       return `
@@ -1298,7 +1232,7 @@
     },
 
     inject() {
-      const v = styles.vars;
+      const t = styles.theme;
       doc.getElementById(CONFIG.ui.styleId)?.remove();
       const style = doc.createElement("style");
       style.id = CONFIG.ui.styleId;
@@ -1322,7 +1256,7 @@
           padding: 2px 6px;
           text-align: right;
           font-size: 12px;
-          color: ${v.accent} !important;
+          color: ${t.accent} !important;
           opacity: 0;
           transition: opacity .12s ease;
         }
@@ -1340,9 +1274,9 @@
         .zen-tidy-tabs-overlay.open { opacity: 1; }
         .zen-tidy-tabs-modal {
           width: 340px; max-width: calc(100vw - 32px);
-          background: ${v.bg};
-          color: ${v.text};
-          border: 1px solid ${v.border};
+          background: ${t.bg};
+          color: ${t.text};
+          border: 1px solid ${t.border};
           border-radius: 14px;
           box-shadow: 0 18px 48px rgba(0,0,0,.5);
           font: menu;
@@ -1357,10 +1291,10 @@
         }
         .zen-tidy-tabs-modal-title { font-size: 14px; font-weight: 600; }
         .zen-tidy-tabs-modal-close {
-          all: unset; cursor: pointer; color: ${v.muted};
+          all: unset; cursor: pointer; color: ${t.muted};
           width: 22px; height: 22px; border-radius: 6px; text-align: center;
         }
-        .zen-tidy-tabs-modal-close:hover { background: ${v.elevated}; color: ${v.text}; }
+        .zen-tidy-tabs-modal-close:hover { background: ${t.elevated}; color: ${t.text}; }
         .zen-tidy-tabs-modal-body { padding: 4px 16px 8px; display: flex; flex-direction: column; gap: 14px; }
         .zen-tidy-tabs-modal-footer {
           display: flex; align-items: center; gap: 8px;
@@ -1369,16 +1303,16 @@
         .zen-tidy-tabs-spacer { flex: 1; }
 
         .zen-tidy-tabs-field { display: flex; flex-direction: column; gap: 6px; }
-        .zen-tidy-tabs-label { font-size: 11px; color: ${v.muted}; font-weight: 600; }
+        .zen-tidy-tabs-label { font-size: 11px; color: ${t.muted}; font-weight: 600; }
         .zen-tidy-tabs-input {
           all: unset; box-sizing: border-box; width: 100%;
           padding: 8px 10px; font-size: 13px;
-          color: ${v.text};
-          background: ${v.elevated};
-          border: 1px solid ${v.border}; border-radius: 9px;
+          color: ${t.text};
+          background: ${t.elevated};
+          border: 1px solid ${t.border}; border-radius: 9px;
         }
         .zen-tidy-tabs-input:focus-within, .zen-tidy-tabs-input:focus {
-          border-color: ${v.accent};
+          border-color: ${t.accent};
         }
 
         /* ---- Color swatches (the 9 native group colors) ---- */
@@ -1392,39 +1326,39 @@
         }
         .zen-tidy-tabs-swatch:hover { transform: scale(1.08); }
         .zen-tidy-tabs-swatch.selected {
-          box-shadow: 0 0 0 2px ${v.bg}, 0 0 0 4px var(--swatch);
+          box-shadow: 0 0 0 2px ${t.bg}, 0 0 0 4px var(--swatch);
         }
 
         /* ---- Segmented control ---- */
         .zen-tidy-tabs-segment {
           display: inline-flex; flex-wrap: wrap; padding: 3px; gap: 3px;
-          background: ${v.elevated}; border: 1px solid ${v.border};
+          background: ${t.elevated}; border: 1px solid ${t.border};
           border-radius: 10px;
         }
         .zen-tidy-tabs-seg {
           all: unset; cursor: pointer; padding: 5px 12px; font-size: 12px;
-          color: ${v.muted}; border-radius: 7px; text-align: center;
+          color: ${t.muted}; border-radius: 7px; text-align: center;
         }
-        .zen-tidy-tabs-seg.active { background: ${v.accent}; color: #fff; }
+        .zen-tidy-tabs-seg.active { background: ${t.accent}; color: #fff; }
 
-        .zen-tidy-tabs-hint { margin: 2px 0 0; font-size: 11px; color: ${v.muted}; }
-        .zen-tidy-tabs-link { color: ${v.accent}; cursor: pointer; text-decoration: underline; }
+        .zen-tidy-tabs-hint { margin: 2px 0 0; font-size: 11px; color: ${t.muted}; }
+        .zen-tidy-tabs-link { color: ${t.accent}; cursor: pointer; text-decoration: underline; }
 
         /* ---- Buttons ---- */
         .zen-tidy-tabs-btn {
           all: unset; cursor: pointer; padding: 7px 14px; font-size: 13px; font-weight: 600;
-          border-radius: 9px; color: ${v.text}; background: ${v.elevated};
-          border: 1px solid ${v.border}; text-align: center;
+          border-radius: 9px; color: ${t.text}; background: ${t.elevated};
+          border: 1px solid ${t.border}; text-align: center;
         }
         .zen-tidy-tabs-btn:hover { filter: brightness(1.12); }
-        .zen-tidy-tabs-btn.primary { background: ${v.accent}; border-color: transparent; color: #fff; }
+        .zen-tidy-tabs-btn.primary { background: ${t.accent}; border-color: transparent; color: #fff; }
         .zen-tidy-tabs-btn.ghost { background: transparent; }
         .zen-tidy-tabs-btn.danger { background: transparent; border-color: transparent; color: #e26d6d; }
         .zen-tidy-tabs-btn.danger:hover { background: rgba(226,109,109,.14); filter: none; }
 
         /* ---- Inline group rename ---- */
         .tab-group-label.zen-tidy-tabs-inline-editing {
-          outline: 1px solid ${v.accent} !important;
+          outline: 1px solid ${t.accent} !important;
           outline-offset: 1px;
           border-radius: 5px;
           cursor: text;
@@ -1460,14 +1394,17 @@
         setTimeout(() => {
           const note = box.getNotificationWithValue?.("zen-tidy-tabs-msg");
           if (note) box.removeNotification(note);
-        }, 6000);
+        }, CONFIG.timing.notifyDurationMs);
       } catch {
-        /* notification box not available — console log already happened */
+        /* notification box unavailable — the console log above already fired */
       }
     },
 
     async runTidy() {
-      if (orchestrator.running) { Log.tidy.debug("Ignoring Tidy request: a tidy run is already in progress."); return; }
+      if (orchestrator.running) {
+        Log.tidy.debug("Ignoring Tidy request: a tidy run is already in progress.");
+        return;
+      }
 
       const apiKey = prefs.apiKey();
       if (!apiKey) {
@@ -1476,7 +1413,7 @@
         return;
       }
 
-      // Re-tidy considers the ENTIRE workspace, not just new tabs.
+      // Re-tidy considers the entire workspace, not just new tabs.
       const sourceTabs = tabs.collect(true);
       if (sourceTabs.length < CONFIG.grouping.minTabs) {
         Log.tidy.warn(`Tidy aborted: only ${sourceTabs.length} eligible tab(s), need at least ${CONFIG.grouping.minTabs}.`);
@@ -1488,13 +1425,10 @@
       control.setBusy(true);
       try {
         Log.tidy.info(`Starting tidy of ${sourceTabs.length} tab(s) (model: ${prefs.model()}, urlMode: ${prefs.urlMode()}).`);
-        const data = await ai.request(tabs.snapshot(sourceTabs), apiKey, prefs.model());
-        const plan = ai.parseGroups(ai.extractText(data), sourceTabs);
+        const response = await ai.request(tabs.snapshot(sourceTabs), apiKey, prefs.model());
+        const plan = ai.parseGroups(ai.extractText(response), sourceTabs);
         Log.tidy.info("Grouping plan:", plan.map((g) => `${g.name}(${g.tabs.length})`).join(", "));
 
-        // apply() reconciles against existing groups in place: groups that
-        // survive keep their position + color, only changed tabs move, and
-        // abandoned groups dissolve. No nesting, minimal disruption.
         groups.apply(plan);
         groups.scheduleEmptyCheck();
         Log.tidy.info(`Tidy complete: sorted ${sourceTabs.length} tab(s) into ${plan.length} group(s).`);
@@ -1510,8 +1444,8 @@
   };
 
   // ============================================================================
-  // diag — one-shot DOM diagnostics. Reveals what "Clear" actually is and how
-  // the sidebar is laid out, so placement can be targeted precisely.
+  // Diagnostics — one-shot DOM dump. Reveals what "Clear" actually is and how
+  // the sidebar is laid out, so placement can be targeted precisely. Debug-only.
   // ============================================================================
   const diag = {
     pseudo(el, which) {
@@ -1520,12 +1454,15 @@
 
     path(el, depth = 8) {
       const parts = [];
-      let cur = el;
-      for (let i = 0; cur && i < depth; i++) { parts.unshift(dom.describe(cur)); cur = cur.parentElement; }
+      let current = el;
+      for (let i = 0; current && i < depth; i++) {
+        parts.unshift(dom.describe(current));
+        current = current.parentElement;
+      }
       return parts.join(" > ");
     },
 
-    // Every element anywhere whose text / label / tooltip / pseudo says "clear".
+    // Every element whose text / label / tooltip / pseudo says "clear".
     clearCandidates() {
       const hits = [];
       const selector = "toolbarbutton, button, label, span, hbox, vbox, toolbaritem, div, image, [label], [tooltiptext]";
@@ -1555,9 +1492,9 @@
     run() {
       Log.diagnose.info("================= DOM DIAGNOSIS =================");
 
-      const sel = gBrowser.selectedTab;
-      Log.diagnose.info("selectedTab:", dom.describe(sel));
-      Log.diagnose.info("  ancestry:", diag.path(sel));
+      const selectedTab = gBrowser.selectedTab;
+      Log.diagnose.info("selectedTab:", dom.describe(selectedTab));
+      Log.diagnose.info("  ancestry:", diag.path(selectedTab));
 
       const section = dom.activeSection();
       Log.diagnose.info("activeSection:", dom.describe(section));
@@ -1566,15 +1503,14 @@
       }
       Log.diagnose.info("firstNormalNode:", section ? dom.describe(dom.firstNormalNode(section)) : "n/a");
 
-      const clearViaMatcher = dom.clearControl();
-      Log.diagnose.info("clearControl() result:", dom.describe(clearViaMatcher));
+      Log.diagnose.info("clearControl() result:", dom.describe(dom.clearControl()));
 
       const hits = diag.clearCandidates();
       Log.diagnose.info("'clear' candidates found:", hits.length);
-      hits.slice(0, 12).forEach((h, i) => {
-        Log.diagnose.info(`  [${i}] ${dom.describe(h.el)}`);
-        Log.diagnose.info(`       text="${h.text.slice(0, 24)}" label="${h.label}" tip="${h.tip}" pseudo=${JSON.stringify(h.pseudo).slice(0, 40)}`);
-        Log.diagnose.info(`       path: ${diag.path(h.el, 6)}`);
+      hits.slice(0, 12).forEach((hit, i) => {
+        Log.diagnose.info(`  [${i}] ${dom.describe(hit.el)}`);
+        Log.diagnose.info(`       text="${hit.text.slice(0, 24)}" label="${hit.label}" tip="${hit.tip}" pseudo=${JSON.stringify(hit.pseudo).slice(0, 40)}`);
+        Log.diagnose.info(`       path: ${diag.path(hit.el, 6)}`);
       });
 
       const newTab = diag.newTabButton();
@@ -1590,7 +1526,7 @@
 
   // ============================================================================
   // Init — mount the control (polling until the sidebar DOM exists), inject
-  // styles, and install the group editor.
+  // styles, and install the group editor + empty-group watcher.
   // ============================================================================
   const init = () => {
     Log.init.info("Loading Zen Tidy Tabs…");
@@ -1605,13 +1541,13 @@
     if (!control.mount()) {
       let attempts = 0;
       const timer = setInterval(() => {
-        if (control.mount() || ++attempts > 40) {
+        if (control.mount() || ++attempts > CONFIG.timing.mountMaxAttempts) {
           clearInterval(timer);
           if (!doc.getElementById(CONFIG.ui.controlId)) {
             Log.dom.warn(`Tidy control not placed after ${attempts} attempt(s); it will appear when you hover the tab separator.`);
           }
         }
-      }, 250);
+      }, CONFIG.timing.mountRetryMs);
     }
 
     // Manual controls for debugging from the Browser Console.
