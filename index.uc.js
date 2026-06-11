@@ -76,13 +76,50 @@
   };
 
   // ============================================================================
-  // Logging — log() always prints; debug() only when CONFIG.debug is on.
+  // Logging — one consistent, scoped logger for the whole script.
+  //
+  // Every line is tagged "[Zen Tidy Tabs] [<step>]" so both its origin and the
+  // stage it belongs to are obvious in the Browser Console. Severity maps to the
+  // matching console method, and verbose tracing is routed through console.debug
+  // — emitted only when CONFIG.debug is on (toggle it at the top of this file).
+  //
+  //   .info(…)   lifecycle / outcome messages worth seeing every run
+  //   .warn(…)   recoverable problems and unexpected-but-handled states
+  //   .error(…)  failures the user should know about
+  //   .debug(…)  step-by-step tracing for diagnosing issues (CONFIG.debug only)
+  //
+  // Steps (named stages of the script's life):
+  //   init    bootstrap, environment resolution, lifecycle
+  //   config  reading / writing preferences
+  //   dom     locating Zen's sidebar and mounting the Tidy control
+  //   styles  injecting our stylesheet
+  //   ai      OpenRouter request / response handling
+  //   groups  creating, reconciling and cleaning up native tab groups
+  //   tidy    the end-to-end "tidy my tabs" run
+  //   events  user interactions (rename, recolor, settings, close)
+  //   diag    one-shot DOM diagnostics
   // ============================================================================
   const PREFIX = "[Zen Tidy Tabs]";
-  const log = (...args) => console.log(PREFIX, ...args);
-  const warn = (...args) => console.warn(PREFIX, ...args);
-  const fail = (...args) => console.error(PREFIX, ...args);
-  const debug = (...args) => { if (CONFIG.debug) console.log(PREFIX, ...args); };
+  const makeLogger = (step) => {
+    const tag = `${PREFIX} [${step}]`;
+    return {
+      info: (...args) => console.info(tag, ...args),
+      warn: (...args) => console.warn(tag, ...args),
+      error: (...args) => console.error(tag, ...args),
+      debug: (...args) => { if (CONFIG.debug) console.debug(tag, ...args); },
+    };
+  };
+  const Log = {
+    init: makeLogger("Initialization"),
+    config: makeLogger("Config"),
+    dom: makeLogger("DOM"),
+    styles: makeLogger("Styles"),
+    ai: makeLogger("AI"),
+    groups: makeLogger("Groups"),
+    tidy: makeLogger("Tidy"),
+    user: makeLogger("User Interaction"),
+    diagnose: makeLogger("Diagnostics"),
+  };
 
   // ============================================================================
   // Environment — resolve the chrome window that owns gBrowser exactly once.
@@ -98,7 +135,7 @@
         const mru = Services.wm.getMostRecentWindow("navigator:browser");
         if (mru?.gBrowser) win = mru;
       } catch (e) {
-        fail("could not resolve a browser window:", e);
+        Log.init.error("Could not resolve a browser window via Services.wm; gBrowser is unavailable.", e);
       }
     }
     return win && win.gBrowser
@@ -107,8 +144,11 @@
   })();
 
   if (!env) {
-    fail("FATAL: no gBrowser. Run this in the Browser Console (Ctrl+Shift+J)");
-    fail("with devtools.chrome.enabled = true — the web console (F12) won't work.");
+    Log.init.error(
+      "Startup aborted: no window with gBrowser was found. Run this in the " +
+      "Browser Console (Ctrl+Shift+J) with devtools.chrome.enabled = true — " +
+      "the page web console (F12) cannot access the browser chrome."
+    );
     return;
   }
 
@@ -204,7 +244,12 @@
       try { return Services.prefs.getStringPref(name, fallback); } catch { return fallback; }
     },
     set(name, value) {
-      try { Services.prefs.setStringPref(name, value ?? ""); } catch (e) { fail("could not save pref", name, e); }
+      try {
+        Services.prefs.setStringPref(name, value ?? "");
+        Log.config.debug(`Saved preference "${name}".`);
+      } catch (e) {
+        Log.config.error(`Failed to save preference "${name}".`, e);
+      }
     },
     apiKey() { return prefs.get(CONFIG.prefs.apiKey); },
     model() { return prefs.get(CONFIG.prefs.model, CONFIG.api.defaultModel); },
@@ -394,7 +439,7 @@
       } catch (e) {
         // Some models/providers reject response_format. Retry once without it.
         if (e?.status === 400 && /response_format|json/i.test(e.message || "")) {
-          warn("model rejected response_format; retrying without it");
+          Log.ai.warn(`Model "${body.model}" rejected response_format=json_object (HTTP 400); retrying once without it.`);
           delete body.response_format;
           return await ai._post(body, apiKey);
         }
@@ -405,7 +450,7 @@
     // POST to OpenRouter with a hard timeout so a hung request can never lock
     // the Tidy button indefinitely.
     async _post(body, apiKey) {
-      debug("calling OpenRouter, model:", body.model);
+      Log.ai.debug(`Requesting completion from OpenRouter (model: ${body.model}, max_tokens: ${body.max_tokens}, timeout: ${CONFIG.api.timeoutMs}ms).`);
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), CONFIG.api.timeoutMs);
       let res;
@@ -423,16 +468,20 @@
         });
       } catch (e) {
         if (e?.name === "AbortError") {
+          Log.ai.error(`OpenRouter request aborted after exceeding the ${CONFIG.api.timeoutMs / 1000}s timeout (model: ${body.model}).`);
           throw new Error(`OpenRouter request timed out after ${CONFIG.api.timeoutMs / 1000}s`);
         }
+        Log.ai.error(`Network error while contacting OpenRouter (endpoint: ${CONFIG.api.endpoint}).`, e);
         throw e;
       } finally {
         clearTimeout(timer);
       }
 
-      debug("API responded HTTP", res.status);
+      Log.ai.debug(`OpenRouter responded with HTTP ${res.status}${res.statusText ? " " + res.statusText : ""}.`);
       if (!res.ok) {
-        const err = new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 300)}`);
+        const detail = (await res.text()).slice(0, 300);
+        Log.ai.error(`OpenRouter request failed with HTTP ${res.status}. Response body (truncated to 300 chars): ${detail}`);
+        const err = new Error(`OpenRouter ${res.status}: ${detail}`);
         err.status = res.status;
         throw err;
       }
@@ -443,7 +492,9 @@
     // array-style content and reasoning-only replies.
     extractText(data) {
       if (data.error) {
-        throw new Error("API error: " + (data.error.message || JSON.stringify(data.error)));
+        const detail = data.error.message || JSON.stringify(data.error);
+        Log.ai.error("OpenRouter returned an error payload:", detail);
+        throw new Error("API error: " + detail);
       }
       const message = data.choices?.[0]?.message;
       let content = message?.content;
@@ -454,8 +505,12 @@
       if (!content && message?.reasoning) content = String(message.reasoning).trim();
 
       if (!content) {
-        fail("empty content. finish_reason:", data.choices?.[0]?.finish_reason,
-          "model:", data.model, "usage:", JSON.stringify(data.usage));
+        Log.ai.error(
+          "Model returned an empty completion.",
+          "finish_reason:", data.choices?.[0]?.finish_reason,
+          "| model:", data.model,
+          "| usage:", JSON.stringify(data.usage)
+        );
         throw new Error(
           "Model returned empty content. Try a concrete instruct model " +
           "(e.g. openai/gpt-4o-mini) instead of a free/reasoning router."
@@ -472,8 +527,12 @@
       try {
         parsed = JSON.parse(text);
       } catch {
+        Log.ai.debug("Completion was not strict JSON; attempting to extract the first {…} block.");
         const match = text.match(/\{[\s\S]*\}/);
-        if (!match) throw new Error("Could not parse model output: " + text.slice(0, 200));
+        if (!match) {
+          Log.ai.error("Could not extract any JSON object from the model output (truncated to 200 chars):", text.slice(0, 200));
+          throw new Error("Could not parse model output: " + text.slice(0, 200));
+        }
         parsed = JSON.parse(match[0]);
       }
 
@@ -493,7 +552,11 @@
       }
 
       const missed = sourceTabs.filter((_, i) => !used.has(i));
-      if (missed.length) groups.push({ name: "Misc", tabs: missed });
+      if (missed.length) {
+        Log.ai.debug(`Model left ${missed.length} tab(s) ungrouped; collecting them into a "Misc" group.`);
+        groups.push({ name: "Misc", tabs: missed });
+      }
+      Log.ai.debug(`Parsed model output into ${groups.length} group(s) covering ${used.size + missed.length} tab(s).`);
       return groups;
     },
   };
@@ -512,7 +575,7 @@
     create(members, label, color) {
       if (typeof gBrowser.ungroupTab === "function") {
         for (const t of members) {
-          if (t.group) { try { gBrowser.ungroupTab(t); } catch (e) { debug("ungroupTab failed:", e?.message); } }
+          if (t.group) { try { gBrowser.ungroupTab(t); } catch (e) { Log.groups.debug("Failed to detach a tab from its current group before regrouping:", e?.message); } }
         }
       }
       const anchor = members[0];
@@ -533,10 +596,10 @@
           }
           return true;
         } catch (e) {
-          debug("addTabGroup attempt failed for", label, e?.message);
+          Log.groups.debug(`addTabGroup attempt failed for group "${label}":`, e?.message);
         }
       }
-      fail("could not create group:", label);
+      Log.groups.error(`Failed to create tab group "${label}" after ${attempts.length} attempts (${members.length} tab(s)).`);
       return false;
     },
 
@@ -602,8 +665,8 @@
       for (const group of plan) {
         const live = group.tabs.filter(tabs.isAlive);
         const dropped = group.tabs.length - live.length;
-        if (dropped) warn(`${group.name}: skipped ${dropped} tab(s) closed mid-tidy`);
-        if (!live.length) { debug("skipping empty group:", group.name); continue; }
+        if (dropped) Log.groups.warn(`Group "${group.name}": ${dropped} tab(s) were closed during the tidy and will be skipped.`);
+        if (!live.length) { Log.groups.debug(`Group "${group.name}" has no live tabs after filtering; skipping.`); continue; }
 
         const el = existing.get(groups.norm(group.name));
         if (el && typeof el.addTabs === "function") {
@@ -612,13 +675,13 @@
           usedColors.add(el.color || el.getAttribute?.("color") || "");
           const toAdd = live.filter((t) => t.group !== el);
           if (toAdd.length) {
-            debug(`updating group: ${group.name} (+${toAdd.length} tab(s))`);
-            try { el.addTabs(toAdd); } catch (e) { warn("addTabs failed:", e); }
+            Log.groups.debug(`Reusing existing group "${group.name}" in place; adding ${toAdd.length} tab(s).`);
+            try { el.addTabs(toAdd); } catch (e) { Log.groups.warn(`Failed to add tabs to existing group "${group.name}".`, e); }
           }
         } else {
           const color = pickColor();
           usedColors.add(color);
-          debug(`creating group: ${group.name} (${live.length} tabs, ${color})`);
+          Log.groups.debug(`Creating new group "${group.name}" with ${live.length} tab(s) (color: ${color}).`);
           groups.create(live, group.name, color);
         }
       }
@@ -628,7 +691,7 @@
       for (const [, el] of existing) {
         if (matched.has(el)) continue;
         if (groups.hasLiveTabs(el)) {
-          try { el.ungroupTabs?.(); } catch (e) { warn("ungroupTabs failed:", e); }
+          try { el.ungroupTabs?.(); } catch (e) { Log.groups.warn(`Failed to dissolve the abandoned group "${el.label || el.getAttribute?.("label") || "?"}".`, e); }
         }
       }
     },
@@ -666,7 +729,7 @@
             }
           }
         } catch (e) {
-          warn("could not flatten group:", e);
+          Log.groups.warn("Failed to flatten a tab group during the rebuild fallback.", e);
         }
       }
     },
@@ -693,10 +756,10 @@
           else groupEl.remove();
           removed++;
         } catch (e) {
-          try { groupEl.remove(); removed++; } catch { warn("could not remove empty group:", e); }
+          try { groupEl.remove(); removed++; } catch { Log.groups.warn("Could not remove an empty tab group via API or direct DOM removal.", e); }
         }
       }
-      if (removed) debug("removed", removed, "empty group(s)");
+      if (removed) Log.groups.debug(`Removed ${removed} empty group(s) from the active workspace.`);
       return removed;
     },
 
@@ -723,15 +786,15 @@
         pending = setTimeout(() => { pending = null; groups.removeEmpty(); }, 500);
       });
       observer.observe(root, { childList: true, subtree: true });
-      debug("empty-group watcher installed on", dom.describe(root));
+      Log.groups.debug("Empty-group watcher installed on", dom.describe(root) + ".");
     },
 
     // Close every tab in a group (and let the now-empty group dissolve).
     close(groupEl) {
       const members = [...groupEl.querySelectorAll("tab, .tabbrowser-tab")].filter(tabs.isAlive);
-      debug("closing group:", groupEl.label, "(" + members.length + " tabs)");
+      Log.groups.debug(`Closing group "${groupEl.label}" and its ${members.length} tab(s).`);
       for (const tab of members) {
-        try { gBrowser.removeTab(tab, { animate: true }); } catch (e) { warn("removeTab failed:", e); }
+        try { gBrowser.removeTab(tab, { animate: true }); } catch (e) { Log.groups.warn("Failed to close a tab while closing a group.", e); }
       }
       groups.scheduleEmptyCheck();
     },
@@ -862,6 +925,7 @@
     // Edit one group: name + color, with a "Close group" action.
     editGroup(group) {
       const { body, footer } = modal.open("Edit group");
+      Log.user.debug(`Opened the edit modal for group "${group.label}".`);
 
       const name = mk.input(group.label ?? "", { placeholder: "Group name" });
       const picker = ui.colorPicker(group.color);
@@ -872,7 +936,7 @@
       );
 
       const closeGroup = mk.button("Close group", "danger");
-      closeGroup.addEventListener("click", () => { groups.close(group); modal.close(); });
+      closeGroup.addEventListener("click", () => { Log.user.info(`Closing group "${group.label}" via the edit modal.`); groups.close(group); modal.close(); });
 
       const cancel = mk.button("Cancel", "ghost");
       cancel.addEventListener("click", modal.close);
@@ -885,7 +949,8 @@
           const color = picker.get();
           group.color = color;
           group.setAttribute("color", color);
-        } catch (e) { fail("could not update group:", e); }
+          Log.user.info(`Group updated: name="${group.label}", color="${group.color}".`);
+        } catch (e) { Log.user.error("Failed to apply group edits (rename / recolor).", e); }
         modal.close();
       });
 
@@ -897,6 +962,7 @@
     // App settings: key, model, and label appearance — no about:config needed.
     settings() {
       const { body, footer } = modal.open("Zen Tidy Tabs Settings");
+      Log.user.debug("Opened the settings modal.");
 
       const key = mk.input(prefs.apiKey(), { type: "password", placeholder: "sk-or-v1-..." });
       const model = mk.input(prefs.model(), { placeholder: CONFIG.api.defaultModel });
@@ -969,6 +1035,7 @@
         prefs.set(CONFIG.prefs.model, model.value.trim());
         prefs.set(CONFIG.prefs.labelStyle, labelSeg.get());
         prefs.set(CONFIG.prefs.urlMode, urlSeg.get());
+        Log.user.info(`Settings saved (model: ${model.value.trim() || CONFIG.api.defaultModel}, labelStyle: ${labelSeg.get()}, urlMode: ${urlSeg.get()}, apiKey: ${key.value.trim() ? "set" : "empty"}).`);
         styles.inject(); // re-apply label appearance immediately
         modal.close();
         orchestrator.notify("Settings saved.");
@@ -997,12 +1064,13 @@
       el.className = twinOf ? twinOf.className : "zen-tidy-tabs-fallback";
       if (twinOf) el.dataset.twin = "1";
 
-      const onTidy = (e) => { e.preventDefault(); e.stopPropagation(); orchestrator.runTidy(); };
+      const onTidy = (e) => { e.preventDefault(); e.stopPropagation(); Log.user.debug("Tidy control activated (click / command)."); orchestrator.runTidy(); };
       el.addEventListener("click", onTidy);
       el.addEventListener("command", onTidy); // XUL buttons fire command
       el.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         e.stopPropagation();
+        Log.user.debug("Tidy control right-clicked; opening settings.");
         ui.settings();
       });
       return el;
@@ -1017,7 +1085,7 @@
       if (!clear?.parentElement) return false;
       existing?.remove();
       clear.parentElement.insertBefore(control.build(clear), clear);
-      log("control mounted: twin of Clear (" + dom.describe(clear) + ")");
+      Log.dom.info("Tidy control mounted as a twin of the Clear button (" + dom.describe(clear) + ").");
       return true;
     },
 
@@ -1031,7 +1099,7 @@
       // early-returns once a twin exists.
       const target = doc.documentElement;
       target.addEventListener("mouseover", () => control.placeTwinIfClearPresent(), true);
-      debug("clear watcher installed on", dom.describe(target));
+      Log.dom.debug("Clear-button hover watcher installed on", dom.describe(target) + ".");
     },
 
     // Mount strategy:
@@ -1048,12 +1116,12 @@
         const anchor = section && dom.firstNormalNode(section);
         if (anchor?.parentElement) {
           anchor.parentElement.insertBefore(control.build(null), anchor);
-          log("control mounted: separator fallback (hover to reveal; will upgrade to twin)");
+          Log.dom.info("Tidy control mounted via separator fallback (hover to reveal; will upgrade to a Clear twin when one appears).");
           return true;
         }
       }
 
-      debug("no mount target yet (will retry / wait for hover)");
+      Log.dom.debug("No mount target available yet; will retry or wait for a hover.");
       return !!doc.getElementById(CONFIG.ui.controlId);
     },
 
@@ -1111,7 +1179,7 @@
         },
         true // capture, so we act before the label's own handler
       );
-      debug("group editor installed (click to rename, double-click for options)");
+      Log.user.debug("Group label editor installed (single click renames inline, double click opens the edit modal).");
     },
 
     startInline(group, labelEl) {
@@ -1132,8 +1200,8 @@
         const name = (labelEl.textContent || "").trim();
         editor.finishInline();
         if (name && name !== original) {
-          try { group.label = name; group.setAttribute("label", name); }
-          catch (e) { fail("could not rename group:", e); labelEl.textContent = original; }
+          try { group.label = name; group.setAttribute("label", name); Log.user.info(`Renamed group "${original}" to "${name}".`); }
+          catch (e) { Log.user.error(`Failed to rename group "${original}" to "${name}"; restoring the previous name.`, e); labelEl.textContent = original; }
         } else {
           labelEl.textContent = original;
         }
@@ -1342,7 +1410,7 @@
         ${styles.labelStyleCss()}
       `;
       (doc.head || doc.documentElement).appendChild(style);
-      debug("styles injected (labelStyle:", prefs.labelStyle() + ")");
+      Log.styles.debug(`Stylesheet injected (#${CONFIG.ui.styleId}, labelStyle: ${prefs.labelStyle()}).`);
     },
   };
 
@@ -1353,7 +1421,7 @@
     running: false,
 
     notify(message, isError = false) {
-      (isError ? fail : log)(message);
+      (isError ? Log.tidy.error : Log.tidy.info)(message);
       try {
         const box = gBrowser.getNotificationBox();
         box.appendNotification(
@@ -1374,10 +1442,11 @@
     },
 
     async runTidy() {
-      if (orchestrator.running) { debug("tidy already running"); return; }
+      if (orchestrator.running) { Log.tidy.debug("Ignoring Tidy request: a tidy run is already in progress."); return; }
 
       const apiKey = prefs.apiKey();
       if (!apiKey) {
+        Log.tidy.warn("Tidy aborted: no OpenRouter API key configured.");
         orchestrator.notify("Set your key in about:config → " + CONFIG.prefs.apiKey, true);
         return;
       }
@@ -1385,6 +1454,7 @@
       // Re-tidy considers the ENTIRE workspace, not just new tabs.
       const sourceTabs = tabs.collect(true);
       if (sourceTabs.length < CONFIG.grouping.minTabs) {
+        Log.tidy.warn(`Tidy aborted: only ${sourceTabs.length} eligible tab(s), need at least ${CONFIG.grouping.minTabs}.`);
         orchestrator.notify(`Need at least ${CONFIG.grouping.minTabs} tabs to tidy.`, true);
         return;
       }
@@ -1392,20 +1462,21 @@
       orchestrator.running = true;
       control.setBusy(true);
       try {
-        log(`tidying ${sourceTabs.length} tabs`);
+        Log.tidy.info(`Starting tidy of ${sourceTabs.length} tab(s) (model: ${prefs.model()}, urlMode: ${prefs.urlMode()}).`);
         const data = await ai.request(tabs.snapshot(sourceTabs), apiKey, prefs.model());
         const plan = ai.parseGroups(ai.extractText(data), sourceTabs);
-        log("plan:", plan.map((g) => `${g.name}(${g.tabs.length})`).join(", "));
+        Log.tidy.info("Grouping plan:", plan.map((g) => `${g.name}(${g.tabs.length})`).join(", "));
 
         // apply() reconciles against existing groups in place: groups that
         // survive keep their position + color, only changed tabs move, and
         // abandoned groups dissolve. No nesting, minimal disruption.
         groups.apply(plan);
         groups.scheduleEmptyCheck();
+        Log.tidy.info(`Tidy complete: sorted ${sourceTabs.length} tab(s) into ${plan.length} group(s).`);
         orchestrator.notify(`Sorted ${sourceTabs.length} tabs into ${plan.length} groups.`);
       } catch (e) {
+        Log.tidy.error("Tidy run failed.", e);
         orchestrator.notify("failed: " + (e.message || e), true);
-        fail(e);
       } finally {
         orchestrator.running = false;
         control.setBusy(false);
@@ -1457,38 +1528,38 @@
     },
 
     run() {
-      log("================= DOM DIAGNOSIS =================");
+      Log.diagnose.info("================= DOM DIAGNOSIS =================");
 
       const sel = gBrowser.selectedTab;
-      log("selectedTab:", dom.describe(sel));
-      log("  ancestry:", diag.path(sel));
+      Log.diagnose.info("selectedTab:", dom.describe(sel));
+      Log.diagnose.info("  ancestry:", diag.path(sel));
 
       const section = dom.activeSection();
-      log("activeSection:", dom.describe(section));
+      Log.diagnose.info("activeSection:", dom.describe(section));
       if (section) {
-        log("  children:", [...section.children].map((c) => dom.describe(c)).join("  |  "));
+        Log.diagnose.info("  children:", [...section.children].map((c) => dom.describe(c)).join("  |  "));
       }
-      log("firstNormalNode:", section ? dom.describe(dom.firstNormalNode(section)) : "n/a");
+      Log.diagnose.info("firstNormalNode:", section ? dom.describe(dom.firstNormalNode(section)) : "n/a");
 
       const clearViaMatcher = dom.clearControl();
-      log("clearControl() result:", dom.describe(clearViaMatcher));
+      Log.diagnose.info("clearControl() result:", dom.describe(clearViaMatcher));
 
       const hits = diag.clearCandidates();
-      log("'clear' candidates found:", hits.length);
+      Log.diagnose.info("'clear' candidates found:", hits.length);
       hits.slice(0, 12).forEach((h, i) => {
-        log(`  [${i}] ${dom.describe(h.el)}`);
-        log(`       text="${h.text.slice(0, 24)}" label="${h.label}" tip="${h.tip}" pseudo=${JSON.stringify(h.pseudo).slice(0, 40)}`);
-        log(`       path: ${diag.path(h.el, 6)}`);
+        Log.diagnose.info(`  [${i}] ${dom.describe(h.el)}`);
+        Log.diagnose.info(`       text="${h.text.slice(0, 24)}" label="${h.label}" tip="${h.tip}" pseudo=${JSON.stringify(h.pseudo).slice(0, 40)}`);
+        Log.diagnose.info(`       path: ${diag.path(h.el, 6)}`);
       });
 
       const newTab = diag.newTabButton();
-      log("newTab button:", dom.describe(newTab));
+      Log.diagnose.info("newTab button:", dom.describe(newTab));
       if (newTab?.parentElement) {
-        log("  newTab siblings:", [...newTab.parentElement.children].map((c) => dom.describe(c)).join("  |  "));
-        log("  newTab parent path:", diag.path(newTab.parentElement, 6));
+        Log.diagnose.info("  newTab siblings:", [...newTab.parentElement.children].map((c) => dom.describe(c)).join("  |  "));
+        Log.diagnose.info("  newTab parent path:", diag.path(newTab.parentElement, 6));
       }
 
-      log("================ END DIAGNOSIS =================");
+      Log.diagnose.info("================ END DIAGNOSIS =================");
     },
   };
 
@@ -1497,9 +1568,9 @@
   // styles, and install the group editor.
   // ============================================================================
   const init = () => {
-    log("init — Zen Tidy Tabs loading");
-    debug("location:", (() => { try { return location.href; } catch { return "?"; } })());
-    debug("addTabGroup:", typeof gBrowser.addTabGroup, "| tabs:", gBrowser.tabs.length);
+    Log.init.info("Loading Zen Tidy Tabs…");
+    Log.init.debug("location:", (() => { try { return location.href; } catch { return "?"; } })());
+    Log.init.debug(`Environment: gBrowser.addTabGroup is ${typeof gBrowser.addTabGroup}, ${gBrowser.tabs.length} tab(s) open.`);
 
     styles.inject();
     editor.install();
@@ -1512,7 +1583,7 @@
         if (control.mount() || ++attempts > 40) {
           clearInterval(timer);
           if (!doc.getElementById(CONFIG.ui.controlId)) {
-            log("control not placed yet — it will appear when you hover the tab separator");
+            Log.dom.warn(`Tidy control not placed after ${attempts} attempt(s); it will appear when you hover the tab separator.`);
           }
         }
       }, 250);
@@ -1527,7 +1598,7 @@
       injectStyles: () => styles.inject(),
       collect: (grouped = true) => tabs.collect(grouped),
     };
-    log("ready — Tidy: click | Settings: right-click the Tidy control");
+    Log.init.info("Ready — left-click the Tidy control to organize tabs; right-click it for settings.");
   };
 
   init();
