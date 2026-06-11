@@ -66,7 +66,7 @@
 
     grouping: {
       colors: ["blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange", "gray"],
-      minTabs: 2, // refuse to tidy fewer than this
+      minTabs: 3, // refuse to tidy fewer than this
     },
 
     snapshot: {
