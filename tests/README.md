@@ -78,6 +78,34 @@ fixture). Locally the default is `workers: 2` (two concurrent Zen windows); in C
 it drops to `1` automatically (the config keys off `process.env.CI`). Adjust the
 local value in `playwright.config.ts` to match your machine.
 
+## Manual inspection
+
+To poke at a real, headed Zen with the script loaded — instead of running the
+automated assertions — use:
+
+```sh
+npm run inspect
+```
+
+This launches Zen exactly like the tests do (injects `../index.uc.js`), seeds a
+few tabs and a `Sample Group`, prints what to try, and then **leaves the window
+open** so you can interact with it by hand. Press `Ctrl+C` in the terminal to
+close it.
+
+- By default the OpenRouter call is stubbed, so clicking 🧹 Tidy deterministically
+  produces `Research` + `Reading` groups — no key or network needed.
+- To exercise the **real** LLM flow, pass your OpenRouter key:
+
+  ```sh
+  # PowerShell
+  $env:ZEN_TIDY_API_KEY = "sk-or-v1-..."; npm run inspect
+  # bash
+  ZEN_TIDY_API_KEY="sk-or-v1-..." npm run inspect
+  ```
+
+It uses its own `manual.config.ts` (with no timeout), so it never runs as part of
+`npm test` or in CI.
+
 ## Continuous integration
 
 Two GitHub Actions workflows live in `../.github/workflows/` and run on PRs to
