@@ -21,5 +21,11 @@
 
     "noEmit": true
   },
-  "include": ["src", "specs", "playwright.config.ts"]
+  "include": [
+    "src",
+    "specs",
+    "manual",
+    "playwright.config.ts",
+    "manual.config.ts"
+  ]
 }

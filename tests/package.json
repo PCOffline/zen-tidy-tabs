@@ -9,6 +9,7 @@
   },
   "scripts": {
     "test": "playwright test",
+    "inspect": "playwright test -c manual.config.ts",
     "report": "playwright show-report",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
