@@ -1,0 +1,85 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Zen Tidy — modal preview</title>
+<style>
+  :root{
+    --bg:#1f1e25; --elevated:#2a2833; --border:#3a3845; --text:#ECECEC;
+    --muted:#9b99a6; --accent:#6c5ce7;
+  }
+  body{margin:0;min-height:100vh;display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start;
+    justify-content:center;padding:40px;background:#15141a;font:menu;font-family:-apple-system,Segoe UI,system-ui,sans-serif;}
+  .zentidy-modal{width:340px;background:var(--bg);color:var(--text);border:1px solid var(--border);
+    border-radius:14px;box-shadow:0 18px 48px rgba(0,0,0,.5);overflow:hidden;}
+  .zentidy-modal-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;}
+  .zentidy-modal-title{font-size:14px;font-weight:600;}
+  .zentidy-modal-close{all:unset;cursor:pointer;color:var(--muted);width:22px;height:22px;border-radius:6px;text-align:center;}
+  .zentidy-modal-close:hover{background:var(--elevated);color:var(--text);}
+  .zentidy-modal-body{padding:4px 16px 8px;display:flex;flex-direction:column;gap:14px;}
+  .zentidy-modal-footer{display:flex;align-items:center;gap:8px;padding:12px 16px 16px;}
+  .zentidy-spacer{flex:1;}
+  .zentidy-field{display:flex;flex-direction:column;gap:6px;}
+  .zentidy-label{font-size:11px;color:var(--muted);font-weight:600;}
+  .zentidy-input{all:unset;box-sizing:border-box;width:100%;padding:8px 10px;font-size:13px;color:var(--text);
+    background:var(--elevated);border:1px solid var(--border);border-radius:9px;}
+  .zentidy-input:focus{border-color:var(--accent);}
+  .zentidy-swatches{display:flex;flex-wrap:wrap;gap:10px;padding:2px 0;}
+  .zentidy-swatch{all:unset;cursor:pointer;width:26px;height:26px;border-radius:50%;background:var(--swatch);
+    box-shadow:0 0 0 2px transparent,0 1px 3px rgba(0,0,0,.3);transition:box-shadow .12s,transform .12s;}
+  .zentidy-swatch:hover{transform:scale(1.08);}
+  .zentidy-swatch.selected{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--swatch);}
+  .zentidy-segment{display:inline-flex;padding:3px;gap:3px;background:var(--elevated);border:1px solid var(--border);border-radius:10px;}
+  .zentidy-seg{all:unset;cursor:pointer;padding:5px 12px;font-size:12px;color:var(--muted);border-radius:7px;text-align:center;}
+  .zentidy-seg.active{background:var(--accent);color:#fff;}
+  .zentidy-hint{margin:2px 0 0;font-size:11px;color:var(--muted);}
+  .zentidy-link{color:var(--accent);cursor:pointer;text-decoration:underline;}
+  .zentidy-btn{all:unset;cursor:pointer;padding:7px 14px;font-size:13px;font-weight:600;border-radius:9px;
+    color:var(--text);background:var(--elevated);border:1px solid var(--border);text-align:center;}
+  .zentidy-btn:hover{filter:brightness(1.12);}
+  .zentidy-btn.primary{background:var(--accent);border-color:transparent;color:#fff;}
+  .zentidy-btn.ghost{background:transparent;}
+  .zentidy-btn.danger{background:transparent;border-color:transparent;color:#e26d6d;}
+  .zentidy-btn.danger:hover{background:rgba(226,109,109,.14);filter:none;}
+</style>
+
+<div class="zentidy-modal">
+  <div class="zentidy-modal-header"><div class="zentidy-modal-title">Edit group</div><button class="zentidy-modal-close">✕</button></div>
+  <div class="zentidy-modal-body">
+    <div class="zentidy-field"><label class="zentidy-label">Name</label><input class="zentidy-input" value="Wynncraft"></div>
+    <div class="zentidy-field"><label class="zentidy-label">Color</label>
+      <div class="zentidy-swatches">
+        <button class="zentidy-swatch" style="--swatch:#4983f0"></button>
+        <button class="zentidy-swatch selected" style="--swatch:#d8453b"></button>
+        <button class="zentidy-swatch" style="--swatch:#e8c14a"></button>
+        <button class="zentidy-swatch" style="--swatch:#54b75e"></button>
+        <button class="zentidy-swatch" style="--swatch:#e667af"></button>
+        <button class="zentidy-swatch" style="--swatch:#8a67e8"></button>
+        <button class="zentidy-swatch" style="--swatch:#3fbcd4"></button>
+        <button class="zentidy-swatch" style="--swatch:#e3893c"></button>
+        <button class="zentidy-swatch" style="--swatch:#8a8a96"></button>
+      </div>
+    </div>
+  </div>
+  <div class="zentidy-modal-footer">
+    <button class="zentidy-btn danger">Close group</button>
+    <div class="zentidy-spacer"></div>
+    <button class="zentidy-btn ghost">Cancel</button>
+    <button class="zentidy-btn primary">Save changes</button>
+  </div>
+</div>
+
+<div class="zentidy-modal">
+  <div class="zentidy-modal-header"><div class="zentidy-modal-title">Tidy settings</div><button class="zentidy-modal-close">✕</button></div>
+  <div class="zentidy-modal-body">
+    <div class="zentidy-field"><label class="zentidy-label">OpenRouter API key</label><input class="zentidy-input" type="password" value="sk-or-v1-xxxxxxxx"></div>
+    <div class="zentidy-field"><label class="zentidy-label">Model</label><input class="zentidy-input" value="openai/gpt-4o-mini"></div>
+    <div class="zentidy-field"><label class="zentidy-label">Group labels</label>
+      <div class="zentidy-segment"><button class="zentidy-seg active">Colored</button><button class="zentidy-seg">Text only</button></div>
+    </div>
+    <p class="zentidy-hint">Key is stored locally. Get one at <a class="zentidy-link">openrouter.ai/keys</a>.</p>
+  </div>
+  <div class="zentidy-modal-footer">
+    <div class="zentidy-spacer"></div>
+    <button class="zentidy-btn ghost">Cancel</button>
+    <button class="zentidy-btn primary">Save settings</button>
+  </div>
+</div>
