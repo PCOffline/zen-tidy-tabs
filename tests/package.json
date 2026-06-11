@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "description": "End-to-end tests for the Zen Tidy Tabs userChrome script, driving the real Zen browser in chrome context.",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "test": "playwright test",
     "report": "playwright show-report",

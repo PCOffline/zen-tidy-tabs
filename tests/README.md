@@ -37,7 +37,7 @@ the chrome window, so the tests always run against the current source.
 
 - **Zen Browser** installed. Default path is `C:\Program Files\Zen Browser\zen.exe`;
   override with the `ZEN_BINARY` env var.
-- **Node.js 20+** (the suite is native ESM).
+- **Node.js 24+** (the suite is native ESM).
 - Internet access on first run: a matching **geckodriver** is downloaded
   automatically into `./.geckodriver/` (cached for later runs). Set
   `GECKODRIVER_PATH` to use an existing binary instead.
