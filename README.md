@@ -6,9 +6,7 @@
 [![Firefox core](https://img.shields.io/badge/Firefox%20core-151-ff7139?logo=firefox-browser&logoColor=white)](https://www.mozilla.org/firefox/)
 
 Arc-style, AI-powered tab tidying built into [Zen Browser](https://zen-browser.app/)'s
-native sidebar. One click sends your open tabs to a language model, which clusters
-them into sensible categories — and Zen Tidy Tabs turns those clusters into native
-Zen tab groups.
+native sidebar. Organise your tabs by categories in the press of a button.
 
 > [!WARNING]
 > **This is a userChrome.js userscript, not a regular browser extension.**
