@@ -29,9 +29,6 @@ export const selectors = {
     apiKey: "zen-tidy-tabs.apikey",
     model: "zen-tidy-tabs.model",
   },
-
-  // window.zenTidyTabs (init())
-  globalApi: "zenTidyTabs",
 } as const;
 
 export type Selectors = typeof selectors;

@@ -19,7 +19,10 @@ test("[manual] open Zen for inspection", async ({ zen }) => {
   const realKey = process.env.ZEN_TIDY_API_KEY;
   if (realKey) {
     await zen.exec(
-      "Services.prefs.setStringPref(arguments[0], arguments[1]); return true;",
+      (key: string, value: string) => {
+        Services.prefs.setStringPref(key, value);
+        return true;
+      },
       "zen-tidy-tabs.apikey",
       realKey,
     );

@@ -1,0 +1,72 @@
+// Ambient declarations for the Firefox/Zen *chrome-context* globals that the
+// functions injected by `ZenDriver.exec` reference. These run inside Zen's
+// privileged chrome window (Marionette CHROME context), not a normal web page,
+// so they aren't covered by TypeScript's "DOM" lib. Types here are intentionally
+// minimal -- only the surface the test harness actually touches.
+
+export {};
+
+declare global {
+  /** A Firefox/Zen `<tab>` element (the `.tabbrowser-tab` in the strip). */
+  interface MozTab extends Element {
+    pinned: boolean;
+    group: MozTabGroup | null;
+  }
+
+  /** A Firefox/Zen `<tab-group>` custom element. */
+  interface MozTabGroup extends Element {
+    label: string;
+    color: string;
+    /** Live tabs in the group; absent on some builds (fall back to a query). */
+    tabs?: MozTab[];
+  }
+
+  interface AddTabGroupOptions {
+    label?: string;
+    color?: string;
+    insertBefore?: MozTab;
+  }
+
+  /** The subset of Zen's global `gBrowser` the harness drives. */
+  interface GBrowser {
+    tabs: MozTab[];
+    selectedTab: MozTab;
+    addTrustedTab(url: string): MozTab;
+    addTab(url: string, opts: { triggeringPrincipal: unknown }): MozTab;
+    removeTab(tab: MozTab, opts?: { animate?: boolean }): void;
+    addTabGroup(tabs: MozTab[], opts?: AddTabGroupOptions): MozTabGroup | null;
+    removeTabGroup(group: MozTabGroup): void;
+  }
+
+  const gBrowser: GBrowser;
+
+  const Services: {
+    scriptSecurityManager: { getSystemPrincipal(): unknown };
+    prefs: { setStringPref(name: string, value: string): void };
+  };
+
+  /** The public API the userscript exposes on `window` (init()). */
+  interface ZenTidyTabsApi {
+    run(): void;
+    settings(): void;
+    mount(): boolean;
+    diagnose(): void;
+    injectStyles(): void;
+    collect(includeGrouped?: boolean): unknown[];
+  }
+
+  /** State the re-tidy flicker watcher stashes on `window` (see ZenDriver). */
+  interface ReTidyWatchState {
+    maxLabelled: number;
+    maxDuplicate: number;
+    labelsAtPeak: string[];
+    obs?: MutationObserver;
+    scan?: () => void;
+  }
+
+  interface Window {
+    zenTidyTabs: ZenTidyTabsApi;
+    __zenTidyTabsOrigFetch?: typeof fetch;
+    __zenTidyReTidyWatch?: ReTidyWatchState;
+  }
+}

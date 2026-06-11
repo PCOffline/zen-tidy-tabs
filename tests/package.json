@@ -9,6 +9,7 @@
   },
   "scripts": {
     "test": "playwright test",
+    "test:headless": "cross-env ZEN_HEADLESS=1 playwright test",
     "inspect": "playwright test -c manual.config.ts",
     "report": "playwright show-report",
     "typecheck": "tsc --noEmit",
@@ -20,6 +21,7 @@
     "@playwright/test": "^1.60.0",
     "@types/node": "^25.9.3",
     "@types/selenium-webdriver": "^4.35.6",
+    "cross-env": "^10.1.0",
     "geckodriver": "^6.1.0",
     "selenium-webdriver": "^4.44.0",
     "typescript": "^6.0.3"

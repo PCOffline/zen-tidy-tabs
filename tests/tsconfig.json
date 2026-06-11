@@ -1,7 +1,12 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "lib": ["ES2023"],
+    // DOM + DOM.Iterable type the browser globals used inside the functions we
+    // inject into Zen's chrome window via ZenDriver.exec (document, events,
+    // MutationObserver, NodeList iteration, ...). Chrome-only globals that the
+    // DOM lib doesn't know about (gBrowser, Services, window.zenTidyTabs) are
+    // declared in src/chrome-globals.d.ts.
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "moduleDetection": "force",

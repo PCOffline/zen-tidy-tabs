@@ -639,9 +639,34 @@
       if (typeof gBrowser.addTabGroup !== "function") {
         throw new Error("gBrowser.addTabGroup is unavailable in this Zen build.");
       }
+      const section = dom.activeSection() || doc;
       const existing = groups.existingByName();
+      // Snapshot the group elements that existed BEFORE we touch anything, so we
+      // can evict the ones the plan empties out (see below).
+      const before = [...section.querySelectorAll("tab-group")];
       if (groups.canReconcile(existing)) groups.reconcile(plan, existing);
       else groups.recreate(plan, groups.colorByName());
+
+      // Evict any pre-existing group the plan emptied out: every group in the
+      // recreate() flatten+rebuild, or a group reconcile() abandoned/renamed.
+      // Native dissolve is animated AND deferred, so without this the empty husk
+      // keeps painting beneath the freshly built group for a frame -- the
+      // "two groups stacked on top of each other" re-tidy flicker.
+      //
+      // Only touch elements that existed before (never the ones we just built)
+      // and that hold no live tab. Emptiness is read from the live DOM, not the
+      // group's own `.tabs` list, because that list can lag a frame behind a
+      // reparent and would make us skip a husk that is already visually empty.
+      // removeTabGroup() does the proper native teardown; the follow-up remove()
+      // forces the element out synchronously so no dissolve animation can keep
+      // it on screen. scheduleEmptyCheck() still backstops anything that only
+      // empties once a native tab-close animation settles.
+      for (const el of before) {
+        if (!el.isConnected) continue;
+        if ([...el.querySelectorAll("tab, .tabbrowser-tab")].some(tabs.isAlive)) continue;
+        try { gBrowser.removeTabGroup?.(el); } catch (e) { Log.groups.debug("removeTabGroup failed while evicting an emptied group:", e?.message); }
+        if (el.isConnected) { try { el.remove(); } catch { /* already detached */ } }
+      }
     },
 
     // In-place reconcile against current groups. Groups whose name survives are
