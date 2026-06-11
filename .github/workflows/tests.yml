@@ -61,9 +61,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
-            https://api.github.com/repos/zen-browser/desktop/releases/latest \
-            | grep -m1 '"tag_name"' | cut -d '"' -f4)"
+          tag="$(gh api repos/zen-browser/desktop/releases/latest --jq .tag_name)"
           test -n "$tag"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
