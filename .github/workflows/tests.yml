@@ -1,0 +1,162 @@
+name: Tests
+
+on:
+  pull_request:
+    branches: [main]
+    # Only run the (heavy) browser suite when something it covers changes.
+    paths:
+      - "index.uc.js"
+      - "tests/**"
+      - ".github/workflows/tests.yml"
+
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same PR/branch to save runner minutes.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: tests
+
+jobs:
+  e2e:
+    name: E2E (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Keep every OS running even if one fails, so we see the full matrix.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # Resolve the newest Zen tag once so it can key the browser cache: when Zen
+      # ships a new release the key changes and we re-download; otherwise we hit
+      # the cache.
+      - name: Resolve latest Zen version
+        id: zen
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/zen-browser/desktop/releases/latest \
+            | grep -m1 '"tag_name"' | cut -d '"' -f4)"
+          test -n "$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Zen Browser
+        id: zen-cache
+        uses: actions/cache@v5
+        with:
+          path: tests/.zen-browser
+          key: zen-${{ runner.os }}-${{ steps.zen.outputs.tag }}
+
+      - name: Cache geckodriver
+        uses: actions/cache@v5
+        with:
+          path: tests/.geckodriver
+          key: geckodriver-${{ runner.os }}-${{ hashFiles('tests/package-lock.json') }}
+
+      # ---- Provision a headed-capable Zen, reusing the cache when present ----
+
+      - name: Install headed-mode prerequisites (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # xvfb (virtual display) + the runtime libs Firefox/Zen needs. These
+          # are cheap to install and avoid launch failures when the runner's
+          # Firefox is a snap (which bundles its libs rather than installing them).
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libgtk-3-0 libdbus-glib-1-2 libasound2t64 libx11-xcb1
+
+      - name: Set up Zen (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir=".zen-browser"
+          if [ "${{ steps.zen-cache.outputs.cache-hit }}" != "true" ]; then
+            url="https://github.com/zen-browser/desktop/releases/latest/download/zen.linux-x86_64.tar.xz"
+            curl -fL --retry 3 -o "$RUNNER_TEMP/zen.tar.xz" "$url"
+            mkdir -p "$dir"
+            tar -xJf "$RUNNER_TEMP/zen.tar.xz" -C "$dir"
+          fi
+          bin="$(find "$dir" -maxdepth 2 -type f -name zen | head -n1)"
+          test -n "$bin"
+          echo "ZEN_BINARY=$PWD/$bin" >> "$GITHUB_ENV"
+
+      - name: Set up Zen (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir=".zen-browser"
+          if [ "${{ steps.zen-cache.outputs.cache-hit }}" != "true" ]; then
+            url="https://github.com/zen-browser/desktop/releases/latest/download/zen.macos-universal.dmg"
+            curl -fL --retry 3 -o "$RUNNER_TEMP/zen.dmg" "$url"
+            hdiutil attach "$RUNNER_TEMP/zen.dmg" -nobrowse -mountpoint /Volumes/Zen
+            mkdir -p "$dir"
+            cp -R /Volumes/Zen/*.app "$dir/"
+            hdiutil detach /Volumes/Zen
+            # Strip quarantine so the freshly downloaded app can launch.
+            sudo xattr -dr com.apple.quarantine "$dir" || true
+          fi
+          bin="$(find "$dir" -type f -path '*/Contents/MacOS/*' \( -name zen -o -name firefox \) | head -n1)"
+          test -n "$bin"
+          echo "ZEN_BINARY=$PWD/$bin" >> "$GITHUB_ENV"
+
+      - name: Set up Zen (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $PWD '.zen-browser'
+          if ('${{ steps.zen-cache.outputs.cache-hit }}' -ne 'true') {
+            $exe = Join-Path $env:RUNNER_TEMP 'zen.installer.exe'
+            $url = "https://github.com/zen-browser/desktop/releases/latest/download/zen.installer.exe"
+            Invoke-WebRequest -Uri $url -OutFile $exe
+            # NSIS silent install; /D (install dir) must be the last argument.
+            Start-Process -FilePath $exe -ArgumentList "/S /D=$dir" -Wait
+          }
+          $bin = Join-Path $dir 'zen.exe'
+          if (!(Test-Path $bin)) { throw "zen.exe not found at $bin" }
+          # GITHUB_ENV must be UTF-8; PowerShell's `>>` writes UTF-16.
+          "ZEN_BINARY=$bin" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # ---- Run the suite ---------------------------------------------------
+      # GitHub Actions sets CI=true, which the Playwright config reads to pin
+      # workers to 1 and forbid `test.only`.
+
+      - name: Run E2E tests (Linux, headed under Xvfb)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a --server-args="-screen 0 1280x1024x24" npm test
+
+      - name: Run E2E tests (macOS / Windows, headed)
+        if: runner.os != 'Linux'
+        run: npm test
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-${{ matrix.os }}
+          path: tests/playwright-report/
+          retention-days: 7
