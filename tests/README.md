@@ -74,8 +74,27 @@ npm run format
 ```
 
 One Zen instance is launched per Playwright **worker** (the worker-scoped `zen`
-fixture). The default is `workers: 2` (two concurrent Zen windows); adjust it in
-`playwright.config.ts` to match your machine.
+fixture). Locally the default is `workers: 2` (two concurrent Zen windows); in CI
+it drops to `1` automatically (the config keys off `process.env.CI`). Adjust the
+local value in `playwright.config.ts` to match your machine.
+
+## Continuous integration
+
+Two GitHub Actions workflows live in `../.github/workflows/` and run on PRs to
+`main` (only when relevant paths change, with superseded runs auto-cancelled):
+
+- **`quality.yml`** — `npm run lint` (Biome) and `npm run typecheck` (`tsc`) on
+  Ubuntu. Fast and browser-free.
+- **`tests.yml`** — the full E2E suite on a `ubuntu-latest` / `windows-latest` /
+  `macos-latest` matrix. Each job runs the suite headed (Linux under `xvfb`) and
+  uploads the Playwright HTML report as a per-OS artifact.
+
+To keep the matrix cheap, both the **Zen Browser** (keyed on the latest release
+tag) and the **geckodriver** binary are cached between runs, so a normal run
+downloads neither. The npm cache is handled by `actions/setup-node`. CI runs with
+`workers: 1` automatically (the config keys off `process.env.CI`).
+
+Both use Node 24 with `actions/checkout@v6` and `actions/setup-node@v6`.
 
 ## Notes
 

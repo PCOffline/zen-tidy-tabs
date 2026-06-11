@@ -8,12 +8,13 @@ import { defineConfig } from "@playwright/test";
  * config here and no Playwright browser download is required.
  *
  * One Zen instance is launched per worker (the worker-scoped `zen` fixture), so
- * the worker count equals the number of concurrent Zen windows. Two is a sane
- * default; raise it only if your machine handles several headed Zen windows.
+ * the worker count equals the number of concurrent Zen windows. Locally we use
+ * two; in CI we drop to one, because several headed Zen windows under a single
+ * virtual display tend to contend and flake.
  */
 export default defineConfig({
   testDir: "./specs",
-  workers: 2,
+  workers: process.env.CI ? 1 : 2,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,
