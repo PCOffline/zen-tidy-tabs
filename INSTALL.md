@@ -91,14 +91,14 @@ by hand.
    On Windows this is typically
    `%APPDATA%\zen\Profiles\<your-profile>\`.
 2. Go into `chrome\sine-mods\`.
-3. Create a folder named `zen-tidy` and copy `index.js` into it:
-   `chrome\sine-mods\zen-tidy\index.js`
+3. Create a folder named `zen-tidy-tabs` and copy `index.js` into it:
+   `chrome\sine-mods\zen-tidy-tabs\index.js`
 4. Open `chrome\sine-mods\mods.json` and add an entry (merge it into the existing
    JSON object — keep any mods already listed):
 
    ```json
    {
-     "zen-tidy": {
+     "zen-tidy-tabs": {
        "id": "zen-tidy-tabs",
        "name": "Zen Tidy Tabs",
        "description": "Arc-style AI tab tidying in Zen's native sidebar.",

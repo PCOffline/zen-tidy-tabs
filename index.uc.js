@@ -896,7 +896,7 @@
 
     // App settings: key, model, and label appearance — no about:config needed.
     settings() {
-      const { body, footer } = modal.open("Tidy settings");
+      const { body, footer } = modal.open("Zen Tidy Tabs Settings");
 
       const key = mk.input(prefs.apiKey(), { type: "password", placeholder: "sk-or-v1-..." });
       const model = mk.input(prefs.model(), { placeholder: CONFIG.api.defaultModel });
