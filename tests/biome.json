@@ -10,20 +10,46 @@
   },
   "formatter": {
     "enabled": true,
+    "formatWithErrors": false,
     "indentStyle": "space",
     "indentWidth": 2,
-    "lineWidth": 80
+    "lineWidth": 80,
+    "lineEnding": "lf",
+    "bracketSpacing": true
   },
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true
+      "recommended": true,
+      "style": {
+        "useBlockStatements": "error",
+        "useCollapsedElseIf": "error",
+        "useConsistentArrayType": {
+          "level": "error",
+          "options": { "syntax": "shorthand" }
+        },
+        "useShorthandAssign": "error",
+        "useForOf": "error",
+        "noNegationElse": "error",
+        "useThrowNewError": "error",
+        "useThrowOnlyError": "error",
+        "useExplicitLengthCheck": "error"
+      },
+      "suspicious": {
+        "useAwait": "error",
+        "noEmptyBlockStatements": "error"
+      }
     }
   },
   "javascript": {
     "formatter": {
       "quoteStyle": "double",
-      "trailingCommas": "all"
+      "jsxQuoteStyle": "double",
+      "quoteProperties": "asNeeded",
+      "trailingCommas": "all",
+      "semicolons": "always",
+      "arrowParentheses": "always",
+      "bracketSameLine": false
     }
   },
   "assist": {
