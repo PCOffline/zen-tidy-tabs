@@ -4,7 +4,6 @@
 [![Quality](https://github.com/PCOffline/zen-tidy-tabs/actions/workflows/quality.yml/badge.svg)](https://github.com/PCOffline/zen-tidy-tabs/actions/workflows/quality.yml)
 [![Zen Browser](https://img.shields.io/badge/Zen%20Browser-1.20.x-f76f53)](https://zen-browser.app/)
 [![Firefox core](https://img.shields.io/badge/Firefox%20core-151-ff7139?logo=firefox-browser&logoColor=white)](https://www.mozilla.org/firefox/)
-![Type](https://img.shields.io/badge/type-userChrome.js-7c5cff)
 
 Arc-style, AI-powered tab tidying built into [Zen Browser](https://zen-browser.app/)'s
 native sidebar. One click sends your open tabs to a language model, which clusters
