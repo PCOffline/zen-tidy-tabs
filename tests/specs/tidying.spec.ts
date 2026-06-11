@@ -1,14 +1,17 @@
-// @ts-check
-const { test, expect } = require("../src/fixtures");
+import { expect, test } from "../src/fixtures";
+import type { GroupingPlan } from "../src/zen-driver";
 
 /**
  * Build a deterministic two-group plan covering tab indices 0..n-1, matching
  * the schema ai.parseGroups() expects: { groups: [{ name, tabs: [idx...] }] }.
  */
-function twoGroupPlan(n) {
+function twoGroupPlan(n: number): {
+  grouping: GroupingPlan;
+  expected: string[];
+} {
   const half = Math.max(1, Math.floor(n / 2));
-  const research = [];
-  const reading = [];
+  const research: number[] = [];
+  const reading: number[] = [];
   for (let i = 0; i < n; i++) (i < half ? research : reading).push(i);
   return {
     grouping: {
@@ -50,7 +53,7 @@ test.describe("Tidying", () => {
         },
         30_000,
         `expected tab groups ${expected.join(", ")} were not created`,
-        400
+        400,
       );
 
       const labels = await zen.groupLabels();
@@ -58,7 +61,7 @@ test.describe("Tidying", () => {
         expect(labels, `group "${name}" exists`).toContain(name);
         expect(
           await zen.groupTabCount(name),
-          `group "${name}" has tabs`
+          `group "${name}" has tabs`,
         ).toBeGreaterThan(0);
       }
     } finally {

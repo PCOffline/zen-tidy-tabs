@@ -1,8 +1,7 @@
-// @ts-check
-// Selectors / identifiers mirrored from ../../index.js (CONFIG.ui + the markup
+// Selectors / identifiers mirrored from ../../index.uc.js (CONFIG.ui + the markup
 // created by `modal`, `ui`, `control`, and `editor`). Keep this in sync with the
 // script if those names ever change.
-module.exports = {
+export const selectors = {
   // control.build()
   buttonId: "zen-tidy-tabs-button",
   styleId: "zen-tidy-tabs-style",
@@ -33,4 +32,6 @@ module.exports = {
 
   // window.zenTidyTabs (init())
   globalApi: "zenTidyTabs",
-};
+} as const;
+
+export type Selectors = typeof selectors;

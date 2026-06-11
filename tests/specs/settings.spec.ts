@@ -1,5 +1,4 @@
-// @ts-check
-const { test, expect } = require("../src/fixtures");
+import { expect, test } from "../src/fixtures";
 
 test.describe("Settings", () => {
   test.beforeEach(async ({ zen }) => {
@@ -13,12 +12,12 @@ test.describe("Settings", () => {
     test.info().annotations.push({ type: "interaction", description: how });
 
     await zen.waitForOverlay();
-    expect(await zen.overlayTitle()).toBe("Tidy settings");
+    expect(await zen.overlayTitle()).toBe("Zen Tidy Tabs Settings");
 
     // The settings modal exposes the OpenRouter API key (a password field).
     expect(
       await zen.hasModalPasswordField(),
-      "settings modal shows the API key field"
+      "settings modal shows the API key field",
     ).toBe(true);
 
     // Clean up so the modal doesn't leak into the next test.

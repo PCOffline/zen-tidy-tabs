@@ -1,18 +1,19 @@
-// @ts-check
-const { defineConfig } = require("@playwright/test");
+import { defineConfig } from "@playwright/test";
 
 /**
  * The browser is driven by selenium-webdriver in *chrome context* (see
- * src/zen-driver.js), not by Playwright's own browser engine — Playwright can't
+ * src/zen-driver.ts), not by Playwright's own browser engine — Playwright can't
  * launch Zen or reach its chrome UI. We only use @playwright/test as the test
  * runner (fixtures, retries, reporting), so there is no `use`/`projects` browser
  * config here and no Playwright browser download is required.
  *
- * Exactly one Zen instance is launched per worker, so we pin workers to 1.
+ * One Zen instance is launched per worker (the worker-scoped `zen` fixture), so
+ * the worker count equals the number of concurrent Zen windows. Two is a sane
+ * default; raise it only if your machine handles several headed Zen windows.
  */
-module.exports = defineConfig({
+export default defineConfig({
   testDir: "./specs",
-  workers: 1,
+  workers: 2,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,

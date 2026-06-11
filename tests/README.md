@@ -1,8 +1,11 @@
 # Zen Tidy Tabs — end-to-end tests
 
-These tests drive a **real Zen browser** and exercise the `index.js` userChrome
-script the way a user would: clicking the Tidy control, right-clicking it,
-renaming group badges, and tidying tabs.
+These tests drive a **real Zen browser** and exercise the `index.uc.js`
+userChrome script the way a user would: clicking the Tidy control,
+right-clicking it, renaming group badges, and tidying tabs.
+
+The suite is written in **TypeScript (ESM)**, linted/formatted with **Biome**,
+and run with **`@playwright/test`** as the runner.
 
 ## Why not "pure" Playwright?
 
@@ -22,23 +25,24 @@ chrome and userChrome scripts. We still use **`@playwright/test` as the runner**
 
 | Spec | Requirement |
 | --- | --- |
-| `specs/tidy-button.spec.js` | The Tidy button exists; its placement (twin of Clear, or the documented fallback) is correct |
-| `specs/settings.spec.js` | Right-clicking the button opens the Zen Tidy Tabs configuration modal |
-| `specs/tidying.spec.js` | Tidying actually works (the OpenRouter call is stubbed; tabs are sorted into native groups) |
-| `specs/group-badge.spec.js` | Single-click renames a badge inline; double-click opens the rename + recolor modal |
+| `specs/tidy-button.spec.ts` | The Tidy button exists; its placement (twin of Clear, or the documented fallback) is correct |
+| `specs/settings.spec.ts` | Right-clicking the button opens the Zen Tidy Tabs configuration modal |
+| `specs/tidying.spec.ts` | Tidying actually works (the OpenRouter call is stubbed; tabs are sorted into native groups) |
+| `specs/group-badge.spec.ts` | Single-click renames a badge inline; double-click opens the rename + recolor modal |
 
-The script under test is read straight from `../index.js` and injected into the
-chrome window, so the tests always run against the current source.
+The script under test is read straight from `../index.uc.js` and injected into
+the chrome window, so the tests always run against the current source.
 
 ## Requirements
 
 - **Zen Browser** installed. Default path is `C:\Program Files\Zen Browser\zen.exe`;
   override with the `ZEN_BINARY` env var.
-- **Node.js** (18+).
-- Internet access on first run: Selenium Manager downloads a matching geckodriver
-  automatically.
-- Run with a desktop session (headed). Headless Firefox exposes the chrome DOM but
-  reports elements as not-displayed, which breaks real clicks. You can set
+- **Node.js 20+** (the suite is native ESM).
+- Internet access on first run: a matching **geckodriver** is downloaded
+  automatically into `./.geckodriver/` (cached for later runs). Set
+  `GECKODRIVER_PATH` to use an existing binary instead.
+- Run with a desktop session (headed). Headless Firefox exposes the chrome DOM
+  but reports elements as not-displayed, which breaks real clicks. You can set
   `ZEN_HEADLESS=1` to try headless, but it isn't recommended.
 - Close other running Zen windows before the run (the tests launch their own
   isolated, throwaway profile with `-no-remote`).
@@ -58,20 +62,34 @@ Useful variations:
 $env:ZEN_BINARY = "D:\Apps\Zen\zen.exe"; npm test
 
 # A single spec
-npx playwright test specs/tidying.spec.js
+npx playwright test specs/tidying.spec.ts
 
 # Open the HTML report after a run
 npm run report
+
+# Type-check, lint, and format
+npm run typecheck
+npm run lint
+npm run format
 ```
+
+One Zen instance is launched per Playwright **worker** (the worker-scoped `zen`
+fixture). The default is `workers: 2` (two concurrent Zen windows); adjust it in
+`playwright.config.ts` to match your machine.
 
 ## Notes
 
 - The OpenRouter network call is **stubbed** (`installFetchStub`), so tidying is
   deterministic and free — no API key or network is used for the grouping itself.
-  A dummy `zentidy.apikey` pref is pre-seeded so `runTidy()` reaches the stub.
+  A dummy `zen-tidy-tabs.apikey` pref is pre-seeded so `runTidy()` reaches the stub.
 - Real clicks are performed via WebDriver actions. If a chrome element refuses a
   native click (some XUL elements gate interactability), the helpers fall back to
   dispatching a genuine DOM event on the same element; each test annotation records
-  which path was used.
-- Selectors mirror `index.js` and live in `src/selectors.js`. If the script renames
-  an id/class, update that one file.
+  which path was used (`native` vs `dispatched`).
+- Chrome-context keyboard input isn't available for XUL/contenteditable elements,
+  so the inline rename and modal Escape are driven via dispatched DOM events that
+  match the script's own event handlers.
+- Selectors mirror `index.uc.js` and live in `src/selectors.ts`. If the script
+  renames an id/class, update that one file.
+- Chrome context requires Zen to start with `-remote-allow-system-access`
+  (set automatically by the launcher).

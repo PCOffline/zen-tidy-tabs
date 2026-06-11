@@ -1,5 +1,4 @@
-// @ts-check
-const { test, expect } = require("../src/fixtures");
+import { expect, test } from "../src/fixtures";
 
 test.describe("Group badge editing", () => {
   test.beforeEach(async ({ zen }) => {
@@ -19,7 +18,7 @@ test.describe("Group badge editing", () => {
       async () => await zen.labelIsEditing(original),
       5_000,
       "badge did not enter inline-edit mode after a single click",
-      150
+      150,
     );
 
     const renamed = "Renamed Inline";
@@ -29,7 +28,7 @@ test.describe("Group badge editing", () => {
       async () => await zen.groupLabelExists(renamed),
       5_000,
       `group was not renamed to "${renamed}"`,
-      150
+      150,
     );
 
     expect(await zen.groupLabelExists(renamed)).toBe(true);
@@ -61,7 +60,7 @@ test.describe("Group badge editing", () => {
       async () => await zen.groupLabelExists(renamed),
       5_000,
       `group was not renamed to "${renamed}" via the modal`,
-      150
+      150,
     );
 
     expect(await zen.groupLabelExists(renamed)).toBe(true);

@@ -2,14 +2,22 @@
   "name": "zen-tidy-tabs-tests",
   "private": true,
   "version": "0.0.0",
+  "type": "module",
   "description": "End-to-end tests for the Zen Tidy Tabs userChrome script, driving the real Zen browser in chrome context.",
   "scripts": {
     "test": "playwright test",
-    "report": "playwright show-report"
+    "report": "playwright show-report",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome format --write ."
   },
   "devDependencies": {
-    "@playwright/test": "^1.49.1",
-    "geckodriver": "^5.0.0",
-    "selenium-webdriver": "^4.27.0"
+    "@biomejs/biome": "^2.4.16",
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^25.9.3",
+    "@types/selenium-webdriver": "^4.35.6",
+    "geckodriver": "^6.1.0",
+    "selenium-webdriver": "^4.44.0",
+    "typescript": "^6.0.3"
   }
 }

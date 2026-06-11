@@ -1,5 +1,4 @@
-// @ts-check
-const { test, expect } = require("../src/fixtures");
+import { expect, test } from "../src/fixtures";
 
 test.describe("Tidy button", () => {
   test.beforeEach(async ({ zen }) => {
@@ -24,17 +23,17 @@ test.describe("Tidy button", () => {
       expect(p.sameParentAsClear, "button shares Clear's parent").toBe(true);
       expect(
         p.immediatelyBeforeClear,
-        "button sits immediately before Clear"
+        "button sits immediately before Clear",
       ).toBe(true);
     } else {
       // No Clear control in this build/state: the script mounts a hover-reveal
       // fallback inside the active workspace tab section instead.
       console.warn(
-        "Clear control not present — verifying the separator-fallback placement."
+        "Clear control not present — verifying the separator-fallback placement.",
       );
       expect(
         p.inActiveSection,
-        "fallback control lives in the active workspace section"
+        "fallback control lives in the active workspace section",
       ).toBe(true);
     }
   });
