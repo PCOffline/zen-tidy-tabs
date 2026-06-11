@@ -80,6 +80,10 @@ export class ZenDriver {
     options.setPreference("datareporting.policy.dataSubmissionEnabled", false);
     options.setPreference("app.update.enabled", false);
     options.setPreference("app.update.auto", false);
+    // Skip Zen's first-run onboarding ("Welcome to a calmer internet") and the
+    // brief splash screen, both of which otherwise show on every fresh profile.
+    options.setPreference("zen.welcome-screen.seen", true);
+    options.setPreference("zen.watermark.enabled", false);
     // Pre-seed the API key so runTidy() reaches the (stubbed) network call.
     options.setPreference(S.prefs.apiKey, STUB_API_KEY);
 
