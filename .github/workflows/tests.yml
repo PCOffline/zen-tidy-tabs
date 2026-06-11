@@ -8,6 +8,13 @@ on:
       - "index.uc.js"
       - "tests/**"
       - ".github/workflows/tests.yml"
+  push:
+    branches: [main]
+    # Only run the (heavy) browser suite when something it covers changes.
+    paths:
+      - "index.uc.js"
+      - "tests/**"
+      - ".github/workflows/tests.yml"
 
 permissions:
   contents: read
