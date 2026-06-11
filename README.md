@@ -1,5 +1,11 @@
 # Zen Tidy Tabs
 
+[![Tests](https://github.com/PCOffline/zen-tidy-tabs/actions/workflows/tests.yml/badge.svg)](https://github.com/PCOffline/zen-tidy-tabs/actions/workflows/tests.yml)
+[![Quality](https://github.com/PCOffline/zen-tidy-tabs/actions/workflows/quality.yml/badge.svg)](https://github.com/PCOffline/zen-tidy-tabs/actions/workflows/quality.yml)
+[![Zen Browser](https://img.shields.io/badge/Zen%20Browser-1.20.x-f76f53)](https://zen-browser.app/)
+[![Firefox core](https://img.shields.io/badge/Firefox%20core-151-ff7139?logo=firefox-browser&logoColor=white)](https://www.mozilla.org/firefox/)
+![Type](https://img.shields.io/badge/type-userChrome.js-7c5cff)
+
 Arc-style, AI-powered tab tidying built into [Zen Browser](https://zen-browser.app/)'s
 native sidebar. One click sends your open tabs to a language model, which clusters
 them into sensible categories — and Zen Tidy Tabs turns those clusters into native
@@ -81,7 +87,7 @@ For a quick, no-install trial (wiped on restart):
 
 1. In `about:config`, set `devtools.chrome.enabled = true`.
 2. Open the **Browser Console** with `Ctrl+Shift+J` (not the web console / `F12`).
-3. Paste the full contents of `index.js` and press Enter.
+3. Paste the full contents of `index.uc.js` and press Enter.
 
 Manual controls are exposed on `window.zenTidyTabs` for use from the Browser
 Console:
