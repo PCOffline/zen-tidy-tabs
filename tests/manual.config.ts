@@ -14,5 +14,8 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   timeout: 0, // the session stays open until you Ctrl+C
-  reporter: [["list"]],
+  // `dot` is the quietest built-in reporter: a single dot instead of the
+  // per-test/status spam from `list`. The instruction banner the session
+  // prints via console.log is unaffected by the reporter choice.
+  reporter: [["dot"]],
 });
