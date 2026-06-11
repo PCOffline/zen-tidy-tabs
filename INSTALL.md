@@ -1,6 +1,6 @@
 # Installing Zen Tidy Tabs
 
-Zen Tidy Tabs is a **userChrome.js script** (`index.js`). Zen/Firefox cannot
+Zen Tidy Tabs is a **userChrome.js script** (`index.uc.js`). Zen/Firefox cannot
 run these on their own — they need a loader. The recommended loader is
 [Sine](https://github.com/CosmoCreeper/Sine), a mod manager built for Zen.
 
@@ -27,7 +27,7 @@ the script and a small `theme.json` describing it:
 ```
 your-repo/
 ├── theme.json
-└── index.js
+└── index.uc.js
 ```
 
 `theme.json`:
@@ -37,7 +37,7 @@ your-repo/
   "name": "Zen Tidy Tabs",
   "description": "Arc-style AI tab tidying in Zen's native sidebar.",
   "scripts": {
-    "index.js": {
+    "index.uc.js": {
       "include": ["*browser.xhtml*"]
     }
   }
@@ -91,8 +91,8 @@ by hand.
    On Windows this is typically
    `%APPDATA%\zen\Profiles\<your-profile>\`.
 2. Go into `chrome\sine-mods\`.
-3. Create a folder named `zen-tidy-tabs` and copy `index.js` into it:
-   `chrome\sine-mods\zen-tidy-tabs\index.js`
+3. Create a folder named `zen-tidy-tabs` and copy `index.uc.js` into it:
+   `chrome\sine-mods\zen-tidy-tabs\index.uc.js`
 4. Open `chrome\sine-mods\mods.json` and add an entry (merge it into the existing
    JSON object — keep any mods already listed):
 
@@ -105,7 +105,7 @@ by hand.
        "enabled": true,
        "no-updates": true,
        "scripts": {
-         "index.js": {
+         "index.uc.js": {
            "include": ["*browser.xhtml*"]
          }
        }
@@ -118,7 +118,7 @@ by hand.
 6. Set the API key prefs (Method 1, step 5).
 7. `about:support` → **Clear startup cache** → restart.
 
-To update: replace `index.js`, clear the startup cache, and restart.
+To update: replace `index.uc.js`, clear the startup cache, and restart.
 (`"no-updates": true` stops Sine from trying to update a mod that has no repo.)
 
 ---
@@ -136,7 +136,7 @@ standalone userChrome.js loader. Unlike Sine's trimmed bootloader, it scans a
    (on Windows, typically `C:\Program Files\Zen Browser\`).
 3. Copy its `profile/chrome/` files into your profile's `chrome\` folder
    (`about:support` → *Profile Folder*). This creates `chrome\JS\`.
-4. Put `index.js` in `chrome\JS\`.
+4. Put `index.uc.js` in `chrome\JS\`.
 5. Set the API key prefs (Method 1, step 5).
 6. `about:support` → **Clear startup cache** → restart.
 
@@ -153,6 +153,6 @@ For one-off testing without installing anything:
 
 1. `about:config`: `devtools.chrome.enabled = true`.
 2. Open the **Browser Console** (Ctrl+Shift+J) — not the web console (F12).
-3. Paste the full contents of `index.js` and press Enter.
+3. Paste the full contents of `index.uc.js` and press Enter.
 
 This is wiped on restart.
