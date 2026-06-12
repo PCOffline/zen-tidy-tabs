@@ -48,8 +48,8 @@ test("[manual] open Zen for inspection", async ({ zen }) => {
         (realKey
           ? "(using your real OpenRouter key)"
           : "(LLM stubbed → expect 'Research' + 'Reading' groups)"),
-      "   • Single-click a group badge to rename it inline",
-      "   • Double-click a group badge to rename + recolor it",
+      "   • Left-click a group badge to rename it inline",
+      "   • Right-click a group badge to rename + recolor it",
       "",
       " Press Ctrl+C in this terminal when you're done.",
       "========================================================",

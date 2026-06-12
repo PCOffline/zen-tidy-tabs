@@ -2,8 +2,8 @@
 // @name           Zen Tidy Tabs
 // @description    Arc-style AI tab tidying integrated into Zen's native sidebar.
 //                 A hover-reveal "Tidy" control clusters the open tabs via an
-//                 LLM (OpenRouter) into native Zen tab groups. Double-click a
-//                 group label to rename / recolor it.
+//                 LLM (OpenRouter) into native Zen tab groups. Right-click a
+//                 group label to rename / recolor it; left-click renames inline.
 // @author         PCOffline
 // @include        main
 // ==/UserScript==
@@ -82,7 +82,6 @@
 
     // Timing constants in ms (counts where noted) for debounces, polling, retries.
     timing: {
-      doubleClickMs: 300,            // single- vs double-click disambiguation window
       emptyCheckDelayMs: 80,         // delay before the first empty-group sweep
       emptyCheckIntervalMs: 150,     // interval between empty-group sweeps
       emptyCheckMaxTries: 6,         // number of empty-group sweeps per schedule
@@ -1090,19 +1089,19 @@
 
   // ============================================================================
   // Group label editing.
-  //   single click (settled for CONFIG.timing.doubleClickMs) → inline rename
-  //   double click (2nd click within that window)            → full edit modal
-  // The debounce disambiguates the two so a double-click never leaves the label
-  // stuck in the inline-edit state.
+  //   left click  → inline rename
+  //   right click → full edit modal (rename + recolor)
+  // Each gesture maps to exactly one action, so rapid or mixed clicks can never
+  // leave the badge in an inconsistent state.
   // ============================================================================
   const editor = {
-    clickTimer: null,
     active: null, // { labelEl, group, original, cleanup }
 
     install() {
       if (win.__zenTidyTabsEditorInstalled) return;
       win.__zenTidyTabsEditorInstalled = true;
 
+      // Left click → inline rename.
       doc.addEventListener("click", (e) => {
         const labelEl = e.target?.closest?.(".tab-group-label");
         if (!labelEl) return;
@@ -1113,26 +1112,34 @@
         if (editor.active?.labelEl === labelEl) return;
 
         // We own this interaction: block Zen's native click (collapse / its own
-        // inline edit) so single vs double is decided here.
+        // inline edit).
         e.preventDefault();
         e.stopPropagation();
 
-        if (editor.clickTimer) {
-          // Second click within the window → double-click → full edit modal.
-          clearTimeout(editor.clickTimer);
-          editor.clickTimer = null;
-          editor.cancelInline();
-          if (!doc.getElementById("zen-tidy-tabs-overlay")) ui.editGroup(group);
-          return;
-        }
-        // First click → wait to see whether a second one arrives.
-        editor.clickTimer = setTimeout(() => {
-          editor.clickTimer = null;
-          editor.startInline(group, labelEl);
-        }, CONFIG.timing.doubleClickMs);
+        // Don't start an inline edit underneath the edit modal.
+        if (doc.getElementById("zen-tidy-tabs-overlay")) return;
+
+        editor.startInline(group, labelEl);
       }, true); // capture, so we act before the label's own handler
 
-      Log.user.debug("Group label editor installed (single click renames inline, double click opens the edit modal).");
+      // Right click → full edit modal.
+      doc.addEventListener("contextmenu", (e) => {
+        const labelEl = e.target?.closest?.(".tab-group-label");
+        if (!labelEl) return;
+        const group = labelEl.closest("tab-group");
+        if (!group) return;
+
+        // Suppress Zen's native context menu; we open our editor instead.
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Abandon any in-progress inline edit before switching to the modal,
+        // and never stack a second modal on top of an open one.
+        editor.cancelInline();
+        if (!doc.getElementById("zen-tidy-tabs-overlay")) ui.editGroup(group);
+      }, true); // capture, so we act before the label's own handler
+
+      Log.user.debug("Group label editor installed (left click renames inline, right click opens the edit modal).");
     },
 
     startInline(group, labelEl) {

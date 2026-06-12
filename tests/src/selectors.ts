@@ -13,10 +13,11 @@ export const selectors = {
   modalBody: ".zen-tidy-tabs-modal-body",
   modalFooter: ".zen-tidy-tabs-modal-footer",
 
-  // mk.input / mk.button / ui.colorPicker
+  // mk.input / mk.button / ui.colorPicker / ui.segmentedControl
   input: ".zen-tidy-tabs-input",
   btnPrimary: ".zen-tidy-tabs-btn.primary",
   swatch: ".zen-tidy-tabs-swatch",
+  segButton: ".zen-tidy-tabs-seg",
 
   // editor.startInline()
   inlineEditingClass: "zen-tidy-tabs-inline-editing",
@@ -28,6 +29,8 @@ export const selectors = {
   prefs: {
     apiKey: "zen-tidy-tabs.apikey",
     model: "zen-tidy-tabs.model",
+    labelStyle: "zen-tidy-tabs.labelstyle",
+    urlMode: "zen-tidy-tabs.urlmode",
   },
 } as const;
 

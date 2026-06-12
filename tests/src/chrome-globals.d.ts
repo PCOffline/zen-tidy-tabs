@@ -42,7 +42,10 @@ declare global {
 
   const Services: {
     scriptSecurityManager: { getSystemPrincipal(): unknown };
-    prefs: { setStringPref(name: string, value: string): void };
+    prefs: {
+      getStringPref(name: string, fallback: string): string;
+      setStringPref(name: string, value: string): void;
+    };
   };
 
   /** The public API the userscript exposes on `window` (init()). */
@@ -67,6 +70,7 @@ declare global {
   interface Window {
     zenTidyTabs: ZenTidyTabsApi;
     __zenTidyTabsOrigFetch?: typeof fetch;
+    __zenTidyTabsFetchCalls?: number;
     __zenTidyReTidyWatch?: ReTidyWatchState;
   }
 }

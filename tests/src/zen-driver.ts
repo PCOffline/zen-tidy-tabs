@@ -196,7 +196,6 @@ export class ZenDriver {
    * pointer Actions API (`contextClick`, `doubleClick`) silently no-ops against
    * chrome XUL elements -- in headless AND headed mode -- yet `perform()` still
    * resolves, so a successful-looking native call can't be trusted on its own.
-   * The timeout must clear the editor's 300ms single-vs-double click debounce.
    */
   private async overlayAppeared(timeoutMs = 1500): Promise<boolean> {
     try {
@@ -555,6 +554,27 @@ export class ZenDriver {
     }, label);
   }
 
+  /** Close every tab inside the group whose label === `label`. */
+  async closeGroupTabs(label: string): Promise<void> {
+    await this.exec((want: string) => {
+      for (const g of document.querySelectorAll<MozTabGroup>("tab-group")) {
+        if ((g.label || g.getAttribute("label") || "").trim() !== want) {
+          continue;
+        }
+        const list =
+          g.tabs || g.querySelectorAll<MozTab>("tab, .tabbrowser-tab");
+        for (const t of [...list]) {
+          try {
+            gBrowser.removeTab(t, { animate: false });
+          } catch {
+            // best effort: leave tabs that refuse to close
+          }
+        }
+      }
+      return true;
+    }, label);
+  }
+
   // ---- re-tidy flicker watcher -------------------------------------------
 
   /**
@@ -659,37 +679,85 @@ export class ZenDriver {
     return this.$(`tab-group[label="${label}"] ${S.groupLabel}`);
   }
 
-  /** Single click on a group badge (with a dispatched-click fallback). */
+  /** Single left click on a group badge (with a dispatched fallback). */
   async clickLabelOnce(label: string): Promise<InteractionKind> {
     const el = await this.labelElement(label);
     if (await this.tryNative(() => el.click())) {
       return "native";
     }
-    await this.dispatchLabelClicks(label, 1);
+    await this.dispatchLabelEvents(label, ["click"]);
     return "dispatched";
   }
 
-  /** Double click on a group badge (with a dispatched fallback). */
+  /** Double left click on a group badge (with a dispatched fallback). */
   async doubleClickLabel(label: string): Promise<InteractionKind> {
     const el = await this.labelElement(label);
-    // doubleClick goes through the same unreliable Actions API as the
-    // right-click above; confirm the edit modal opened before trusting it.
     if (
       (await this.tryNative(() => this.actions().doubleClick(el).perform())) &&
+      (await this.labelEntersEditing(label))
+    ) {
+      return "native";
+    }
+    await this.dispatchLabelEvents(label, ["click", "click"]);
+    return "dispatched";
+  }
+
+  /** Right click on a group badge (with a dispatched fallback). */
+  async rightClickLabel(label: string): Promise<InteractionKind> {
+    const el = await this.labelElement(label);
+    if (
+      (await this.tryNative(() => this.actions().contextClick(el).perform())) &&
       (await this.overlayAppeared())
     ) {
       return "native";
     }
-    await this.dispatchLabelClicks(label, 2);
+    await this.dispatchLabelEvents(label, ["contextmenu"]);
     return "dispatched";
   }
 
-  private async dispatchLabelClicks(
+  /** Fire a rapid burst of `times` left clicks on a badge. */
+  async spamClickLabel(label: string, times: number): Promise<InteractionKind> {
+    await this.dispatchLabelEvents(label, Array(times).fill("click"));
+    return "dispatched";
+  }
+
+  /** Fire `times` alternating left/right clicks on a badge. */
+  async alternateClicksLabel(
     label: string,
     times: number,
+  ): Promise<InteractionKind> {
+    const gestures = Array.from({ length: times }, (_, i) =>
+      i % 2 === 0 ? "click" : "contextmenu",
+    );
+    await this.dispatchLabelEvents(label, gestures);
+    return "dispatched";
+  }
+
+  /** Poll briefly for the badge to enter inline-edit mode. */
+  private async labelEntersEditing(
+    label: string,
+    timeoutMs = 1500,
+  ): Promise<boolean> {
+    try {
+      await this.driver.wait(
+        async () => await this.labelIsEditing(label),
+        timeoutMs,
+        "badge did not enter inline-edit mode",
+        100,
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Dispatch a sequence of mouse events on a badge in chrome context. */
+  private async dispatchLabelEvents(
+    label: string,
+    types: string[],
   ): Promise<void> {
     await this.exec(
-      (labelSel: string, want: string, n: number) => {
+      (labelSel: string, want: string, eventTypes: string[]) => {
         let target: HTMLElement | null = null;
         for (const lab of document.querySelectorAll<HTMLElement>(labelSel)) {
           const g = lab.closest<MozTabGroup>("tab-group");
@@ -701,16 +769,16 @@ export class ZenDriver {
         if (!target) {
           return false;
         }
-        for (let i = 0; i < n; i++) {
+        for (const type of eventTypes) {
           target.dispatchEvent(
-            new MouseEvent("click", { bubbles: true, cancelable: true }),
+            new MouseEvent(type, { bubbles: true, cancelable: true }),
           );
         }
         return true;
       },
       S.groupLabel,
       label,
-      times,
+      types,
     );
   }
 
@@ -780,6 +848,43 @@ export class ZenDriver {
     );
   }
 
+  /**
+   * Type `typed` into the inline editor, then press Escape. The editor's keydown
+   * handler restores the original text and blurs, so no rename is committed.
+   */
+  async cancelInlineRename(label: string, typed: string): Promise<void> {
+    await this.exec(
+      (labelSel: string, want: string, typedText: string) => {
+        let target: HTMLElement | null = null;
+        for (const lab of document.querySelectorAll<HTMLElement>(labelSel)) {
+          const g = lab.closest<MozTabGroup>("tab-group");
+          if (g && (g.label || g.getAttribute("label") || "").trim() === want) {
+            target = lab;
+            break;
+          }
+        }
+        if (!target) {
+          return false;
+        }
+        target.focus();
+        target.textContent = typedText;
+        target.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Escape",
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        // Belt and braces: run the commit (blur) listener so edit mode exits.
+        target.dispatchEvent(new FocusEvent("blur"));
+        return true;
+      },
+      S.groupLabel,
+      label,
+      typed,
+    );
+  }
+
   // ---- modal -------------------------------------------------------------
 
   async waitForOverlay(): Promise<void> {
@@ -805,6 +910,22 @@ export class ZenDriver {
       10_000,
       "modal overlay did not close",
       150,
+    );
+  }
+
+  /** Whether the modal overlay is currently present in the DOM. */
+  overlayExists(): Promise<boolean> {
+    return this.exec(
+      (overlayId: string) => !!document.getElementById(overlayId),
+      S.overlayId,
+    );
+  }
+
+  /** How many modal panels are currently in the DOM (should be 0 or 1). */
+  modalCount(): Promise<number> {
+    return this.exec(
+      (modalSel: string) => document.querySelectorAll(modalSel).length,
+      S.modal,
     );
   }
 
@@ -893,6 +1014,122 @@ export class ZenDriver {
     });
   }
 
+  // ---- settings modal ----------------------------------------------------
+
+  /** Fill the settings modal's API-key (password) and/or model (text) input. */
+  async fillSettings(values: {
+    apiKey?: string;
+    model?: string;
+  }): Promise<void> {
+    await this.exec(
+      (
+        bodySel: string,
+        inputSel: string,
+        apiKey: string | null,
+        model: string | null,
+      ) => {
+        const inputs = [
+          ...document.querySelectorAll<HTMLInputElement>(
+            `${bodySel} ${inputSel}`,
+          ),
+        ];
+        const fill = (el: HTMLInputElement | undefined, v: string | null) => {
+          if (!el || v === null) {
+            return;
+          }
+          el.focus();
+          el.value = v;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        };
+        fill(
+          inputs.find((i) => i.type === "password"),
+          apiKey,
+        );
+        fill(
+          inputs.find((i) => i.type !== "password"),
+          model,
+        );
+        return true;
+      },
+      S.modalBody,
+      S.input,
+      values.apiKey ?? null,
+      values.model ?? null,
+    );
+  }
+
+  /** Click the segmented-control option whose visible text === `text`. */
+  async selectSegment(text: string): Promise<void> {
+    await this.exec(
+      (segSel: string, want: string) => {
+        for (const b of document.querySelectorAll<HTMLElement>(segSel)) {
+          if ((b.textContent || "").trim() === want) {
+            b.click();
+            return true;
+          }
+        }
+        return false;
+      },
+      S.segButton,
+      text,
+    );
+  }
+
+  /** Current values of the settings modal's API-key and model inputs. */
+  settingsInputValues(): Promise<{ apiKey: string; model: string }> {
+    return this.exec(
+      (bodySel: string, inputSel: string) => {
+        const inputs = [
+          ...document.querySelectorAll<HTMLInputElement>(
+            `${bodySel} ${inputSel}`,
+          ),
+        ];
+        const key = inputs.find((i) => i.type === "password");
+        const model = inputs.find((i) => i.type !== "password");
+        return { apiKey: key?.value ?? "", model: model?.value ?? "" };
+      },
+      S.modalBody,
+      S.input,
+    );
+  }
+
+  /** Visible text of every active (selected) segmented-control option. */
+  activeSegments(): Promise<string[]> {
+    return this.exec(
+      (segSel: string) =>
+        [...document.querySelectorAll<HTMLElement>(`${segSel}.active`)].map(
+          (b) => (b.textContent || "").trim(),
+        ),
+      S.segButton,
+    );
+  }
+
+  // ---- preferences -------------------------------------------------------
+
+  /** Read a string preference (the script persists settings via Services.prefs). */
+  readPref(name: string): Promise<string> {
+    return this.exec((pref: string) => {
+      try {
+        return Services.prefs.getStringPref(pref, "");
+      } catch {
+        return "";
+      }
+    }, name);
+  }
+
+  /** Write a string preference (used to restore state after a test). */
+  async setPref(name: string, value: string): Promise<void> {
+    await this.exec(
+      (pref: string, v: string) => {
+        Services.prefs.setStringPref(pref, v);
+        return true;
+      },
+      name,
+      value,
+    );
+  }
+
   // ---- network stub ------------------------------------------------------
 
   /**
@@ -917,15 +1154,24 @@ export class ZenDriver {
       if (!window.__zenTidyTabsOrigFetch) {
         window.__zenTidyTabsOrigFetch = window.fetch;
       }
-      window.fetch = () =>
-        Promise.resolve(
+      window.__zenTidyTabsFetchCalls = 0;
+      window.fetch = () => {
+        window.__zenTidyTabsFetchCalls =
+          (window.__zenTidyTabsFetchCalls ?? 0) + 1;
+        return Promise.resolve(
           new Response(body, {
             status: 200,
             headers: { "Content-Type": "application/json" },
           }),
         );
+      };
       return true;
     }, payload);
+  }
+
+  /** How many times the installed fetch stub has been invoked. */
+  fetchStubCallCount(): Promise<number> {
+    return this.exec(() => window.__zenTidyTabsFetchCalls ?? 0);
   }
 
   async restoreFetch(): Promise<void> {
@@ -934,6 +1180,7 @@ export class ZenDriver {
         window.fetch = window.__zenTidyTabsOrigFetch;
         window.__zenTidyTabsOrigFetch = undefined;
       }
+      window.__zenTidyTabsFetchCalls = 0;
       return true;
     });
   }
