@@ -373,11 +373,14 @@ export class ZenDriver {
         overlay.remove();
       }
 
-      const principal = Services.scriptSecurityManager.getSystemPrincipal();
-      const keep =
-        typeof gBrowser.addTrustedTab === "function"
-          ? gBrowser.addTrustedTab("about:blank")
-          : gBrowser.addTab("about:blank", { triggeringPrincipal: principal });
+      // Keep Zen's original startup tab as the blank keeper instead of opening
+      // a fresh tab and closing the original. Closing the startup tab leaves a
+      // dangling shutdown blocker that makes a later driver.quit() hang ~60s on
+      // Firefox's async-shutdown watchdog; reusing it avoids that entirely.
+      const keep = gBrowser.tabs[0];
+      if (!keep) {
+        return true;
+      }
       gBrowser.selectedTab = keep;
 
       for (const t of [...gBrowser.tabs]) {
