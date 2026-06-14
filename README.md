@@ -39,7 +39,7 @@ native sidebar. Organise your tabs by categories in the press of a button.
 
 ## Installation
 
-See **[INSTALL.md](./INSTALL.md)** for the full, step-by-step walkthrough (Sine
+See **[INSTALL.md](./docs/INSTALL.md)** for the full, step-by-step walkthrough (Sine
 from a GitHub repo, Sine fully local, or fx-autoconfig). In short:
 
 1. Install a userChrome.js loader (Sine recommended).
