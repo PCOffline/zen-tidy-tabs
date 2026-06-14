@@ -60,12 +60,10 @@ in-place HTML input the script swaps in for the badge.
   activations are ignored.
   _Verified by: `tidy-run.spec.ts › ignores a second activation while a run is in progress`._
 
-- **TIDY-3** — Eligible tabs are collected from the **active workspace only**, and a
-  re-tidy reconsiders the *whole* workspace, **including already-grouped tabs**. A tab is
-  eligible iff it is not pinned, hidden, or closing, is not a Zen empty/glance tab, and
-  belongs to the active workspace.
-  _Verified by: `tidying.spec.ts › re-tidying never paints the old groups beneath the new ones`
-  (re-tidies already-grouped tabs)._
+- **TIDY-3** — A tab is **eligible** for tidying iff it is not pinned, hidden, or closing,
+  and is not a Zen empty/glance tab. Ineligible tabs are never collected, grouped, or sent
+  to the model.
+  _Verified by: `tidying.spec.ts › collecting skips pinned, empty, and glance tabs`._
 
 - **TIDY-4** — **Minimum of 3 eligible tabs.** With fewer than 3, the run aborts *before*
   contacting the model (no network call, no group creation) and notifies the user.
@@ -118,6 +116,16 @@ in-place HTML input the script swaps in for the badge.
   groups; on failure it notifies the failure.
   _Verified by: `tidy-run.spec.ts › notifies success with the tab and group counts` and
   `› notifies failure when the model call fails`._
+
+- **TIDY-11** — Eligible tabs are collected from the **active workspace only**: a tab that
+  belongs to another workspace is never collected, even if it is otherwise eligible.
+  _Unverified._
+
+- **TIDY-12** — A re-tidy reconsiders the *whole* active workspace, **including
+  already-grouped tabs** (`collect(includeGrouped)`), so existing groups can be reorganised
+  rather than left untouched. Status readouts collect ungrouped tabs only.
+  _Verified by: `tidying.spec.ts › re-tidying never paints the old groups beneath the new ones`
+  (re-tidies already-grouped tabs)._
 
 ---
 

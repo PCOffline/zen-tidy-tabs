@@ -34,6 +34,7 @@ declare global {
     addTrustedTab(url: string): MozTab;
     addTab(url: string, opts: { triggeringPrincipal: unknown }): MozTab;
     removeTab(tab: MozTab, opts?: { animate?: boolean }): void;
+    pinTab(tab: MozTab): void;
     addTabGroup(tabs: MozTab[], opts?: AddTabGroupOptions): MozTabGroup | null;
     removeTabGroup(group: MozTabGroup): void;
     /** Zen's native group edit panel (rename + recolor). `panel.state` is

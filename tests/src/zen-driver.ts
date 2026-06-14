@@ -449,6 +449,38 @@ export class ZenDriver {
     return this.exec(() => window.zenTidyTabs.collect(true).length);
   }
 
+  /** Total number of tabs open in the window, eligible or not. */
+  totalTabCount(): Promise<number> {
+    return this.exec(() => gBrowser.tabs.length);
+  }
+
+  /**
+   * Open one pinned tab, one Zen empty tab, and one Zen glance tab -- the three
+   * kinds of tab `collect()` must skip (TIDY-3). Resolves with how many tabs
+   * were added so a test can assert the total grew while the eligible count did
+   * not.
+   */
+  openIneligibleTabs(): Promise<number> {
+    return this.exec(() => {
+      const principal = Services.scriptSecurityManager.getSystemPrincipal();
+      const add = (attr?: string): MozTab => {
+        const url = "data:text/html,<title>Ineligible</title>";
+        const tab =
+          typeof gBrowser.addTrustedTab === "function"
+            ? gBrowser.addTrustedTab(url)
+            : gBrowser.addTab(url, { triggeringPrincipal: principal });
+        if (attr) {
+          tab.setAttribute(attr, "true");
+        }
+        return tab;
+      };
+      gBrowser.pinTab(add());
+      add("zen-empty-tab");
+      add("zen-glance-tab");
+      return 3;
+    });
+  }
+
   /** Create a native Zen tab group with a known label + color. */
   async createGroup(label: string, color: string, n = 2): Promise<void> {
     const ok = await this.exec(

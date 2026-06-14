@@ -56,6 +56,30 @@ test.describe("Tidying", () => {
     await zen.reset();
   });
 
+  test("collecting skips pinned, empty, and glance tabs", async ({ zen }) => {
+    // TIDY-3: collect() excludes tabs that are pinned, Zen empty, or Zen glance.
+    // Arrange: a known set of plain, eligible tabs.
+    await zen.openTabs(4, "Eligible ");
+    const eligibleBefore = await zen.collectCount();
+    const totalBefore = await zen.totalTabCount();
+
+    // Act: add one pinned, one empty, and one glance tab -- all ineligible.
+    const added = await zen.openIneligibleTabs();
+
+    // Assert: the window really grew by the ineligible tabs, yet not one of them
+    // is collected, so the eligible count is unchanged.
+    const totalAfter = await zen.totalTabCount();
+    const eligibleAfter = await zen.collectCount();
+    expect(
+      totalAfter - totalBefore,
+      "the ineligible tabs were actually opened",
+    ).toBe(added);
+    expect(
+      eligibleAfter,
+      "pinned, empty, and glance tabs are never collected",
+    ).toBe(eligibleBefore);
+  });
+
   test("tidying the tabs actually works", async ({ zen }) => {
     // Arrange: several ungrouped tabs and a stubbed OpenRouter response that
     // sorts them into two known groups.
@@ -99,6 +123,7 @@ test.describe("Tidying", () => {
   test("re-tidying never paints the old groups beneath the new ones", async ({
     zen,
   }) => {
+    // TIDY-12 (re-tidy reconsiders already-grouped tabs), TIDY-7, TIDY-9.
     // Arrange: tidy once into two known groups.
     await zen.openTabs(6, "Re-tidy Page ");
     const n = await zen.collectCount();
