@@ -1,7 +1,7 @@
 {
   "name": "zen-tidy-tabs",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "description": "Arc-style, AI-powered tab tidying built into Zen Browser's native sidebar (a userChrome.js script), plus its end-to-end test suite.",
   "homepage": "https://github.com/PCOffline/zen-tidy-tabs",
