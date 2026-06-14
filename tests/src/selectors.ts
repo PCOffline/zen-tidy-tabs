@@ -25,6 +25,11 @@ export const selectors = {
   // native Zen tab groups
   groupLabel: ".tab-group-label",
 
+  // Zen's native "Clear unpinned tabs" control (CONTROL-6: the Tidy twin must NOT
+  // copy this class) and the per-workspace container element (CONTROL-7).
+  clearControlClass: "zen-workspace-close-unpinned-tabs-button",
+  workspaceEl: "zen-workspace",
+
   // prefs (CONFIG.prefs)
   prefs: {
     apiKey: "zen-tidy-tabs.apikey",

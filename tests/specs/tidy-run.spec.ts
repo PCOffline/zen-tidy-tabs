@@ -168,4 +168,47 @@ test.describe("Tidy run", () => {
       await zen.restoreFetch();
     }
   });
+
+  // TIDY-14: a notification's auto-dismiss removes only itself, never a later one.
+  // With one eligible tab every Tidy click bails on the minimum (TIDY-4) and shows a
+  // fresh notification. We reproduce the real cross-test interference: a notification
+  // is cleared from the box (as beforeEach does between tests) while its auto-dismiss
+  // timer is still pending, then a later notification takes the shared value slot.
+  test("a notification's auto-dismiss never removes a later notification", async ({
+    zen,
+  }) => {
+    await zen.openTabs(1, "Notify ");
+
+    // Notification A; its auto-dismiss timer (notifyDurationMs from now) is scheduled.
+    await zen.clickButton();
+    await zen.driver.wait(
+      async () => (await zen.lastNotification()) != null,
+      15_000,
+      "the first notification never appeared",
+      100,
+    );
+
+    // Remove A from the box without cancelling its pending timer — exactly what the
+    // beforeEach clear does between real tests.
+    await zen.clearNotifications();
+
+    // Show notification B in the now-empty box. B reuses A's shared value but is a
+    // distinct element, so A's stale value-based timer would target B.
+    await zen.driver.sleep(3_500);
+    await zen.clickButton();
+    await zen.driver.wait(
+      async () => (await zen.lastNotification()) != null,
+      15_000,
+      "the second notification never appeared",
+      100,
+    );
+
+    // Past when A's timer fires, but well before B's: value-removal deletes the only
+    // notification carrying the shared value (= B); each-dismisses-itself keeps B.
+    await zen.driver.sleep(4_000);
+    expect(
+      await zen.lastNotification(),
+      "the later notification survives the earlier one's auto-dismiss",
+    ).not.toBeNull();
+  });
 });

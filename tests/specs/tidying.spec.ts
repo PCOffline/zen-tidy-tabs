@@ -51,6 +51,35 @@ function renamedPlan(
   };
 }
 
+/**
+ * Build a plan that overflows the single-tab budget (TIDY-13): one multi-tab
+ * group seeds a budget of exactly one singleton, the first ungrouped singleton
+ * is kept, and every later singleton must collapse into a trailing "Other".
+ */
+function singletonBudgetPlan(n: number): {
+  grouping: GroupingPlan;
+  present: string[];
+  collapsed: string[];
+} {
+  const groups = [{ name: "Pair", tabs: [0, 1] }];
+  const present = ["Pair"];
+  const collapsed: string[] = [];
+  for (let i = 2; i < n; i++) {
+    const name = i === 2 ? "Keep One" : `Drop ${i}`;
+    groups.push({ name, tabs: [i] });
+    if (i === 2) {
+      present.push(name);
+    } else {
+      collapsed.push(name);
+    }
+  }
+  // Surplus singletons (and any omitted tab) land in "Other".
+  if (collapsed.length > 0) {
+    present.push("Other");
+  }
+  return { grouping: { groups }, present, collapsed };
+}
+
 test.describe("Tidying", () => {
   test.beforeEach(async ({ zen }) => {
     await zen.reset();
@@ -115,6 +144,51 @@ test.describe("Tidying", () => {
           `group "${name}" has tabs`,
         ).toBeGreaterThan(0);
       }
+    } finally {
+      await zen.restoreFetch();
+    }
+  });
+
+  test("collapses surplus single-tab groups into Other", async ({ zen }) => {
+    // TIDY-13: at most (multi-tab group count) single-tab groups survive; the
+    // rest fold into a trailing "Other" group.
+    await zen.openTabs(5, "Budget Page ");
+    const n = await zen.collectCount();
+    expect(
+      n,
+      "need enough tabs to overflow the singleton budget",
+    ).toBeGreaterThanOrEqual(4);
+
+    const { grouping, present, collapsed } = singletonBudgetPlan(n);
+    await zen.installFetchStub(grouping);
+
+    try {
+      await zen.clickButton();
+
+      await zen.driver.wait(
+        async () => {
+          const labels = await zen.groupLabels();
+          return present.every((name) => labels.includes(name));
+        },
+        30_000,
+        `expected groups ${present.join(", ")} were not created`,
+        400,
+      );
+
+      const labels = await zen.groupLabels();
+      for (const name of present) {
+        expect(labels, `group "${name}" exists`).toContain(name);
+      }
+      for (const name of collapsed) {
+        expect(
+          labels,
+          `surplus singleton "${name}" was collapsed into Other`,
+        ).not.toContain(name);
+      }
+      expect(
+        await zen.groupTabCount("Other"),
+        "Other holds the collapsed singletons",
+      ).toBe(collapsed.length);
     } finally {
       await zen.restoreFetch();
     }

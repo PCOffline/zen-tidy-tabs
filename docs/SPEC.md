@@ -29,11 +29,13 @@ in-place HTML input the script swaps in for the badge.
   _Verified by: `tidy-button.spec.ts › the tidy button exists`._
 
 - **CONTROL-2** — Placement. When Zen's native **Clear** control is present, the Tidy
-  control is a *twin*: same element type and classes as Clear, in Clear's parent,
-  positioned immediately before Clear (so it inherits Clear's hover-reveal look). When
-  no Clear control is present, it falls back to the active workspace tab section,
-  inserted before the first normal (non-pinned, non-essential) node. The mount
-  self-heals: a watcher upgrades the fallback to a twin if Clear later appears.
+  control is a *twin*: the same element type as Clear, in Clear's parent, positioned
+  immediately before Clear, so it inherits Clear's hover-reveal look from Zen's descendant
+  styles. The twin reuses Clear's classes **except** the control class Zen keys its own
+  bookkeeping on (see CONTROL-6). When no Clear control is present, it falls back to the
+  active workspace tab section, inserted before the first normal (non-pinned, non-essential)
+  node. The mount self-heals: a watcher upgrades the fallback to a twin if Clear later
+  appears.
   _Verified by: `tidy-button.spec.ts › the tidy button's placement is correct`._
 
 - **CONTROL-3** — **Left-click** (or a XUL `command` event) on the Tidy control starts a
@@ -47,6 +49,20 @@ in-place HTML input the script swaps in for the badge.
 - **CONTROL-5** — **Right-click** on the Tidy control opens the Settings modal (§5) and
   suppresses the native context menu.
   _Verified by: `settings.spec.ts › right-clicking the button opens the Zen Tidy Tabs configuration`._
+
+- **CONTROL-6** — The Tidy twin must not impersonate Zen's Clear control. It never carries
+  Zen's `zen-workspace-close-unpinned-tabs-button` class, so Zen's own first-match
+  `querySelector` for that control always resolves to the real Clear button rather than the
+  twin. As a result the real Clear control keeps its native icon and styling even with the
+  Tidy twin mounted immediately before it.
+  _Verified by: `tidy-button.spec.ts › the tidy twin does not steal Clear's control class`._
+
+- **CONTROL-7** — The Tidy control follows the **active workspace**. Zen keeps one
+  `<zen-workspace>` element per workspace in the DOM; on every workspace change (observed via
+  `gZenWorkspaces.addChangeListeners`) the control is re-placed into the active workspace, so
+  exactly one Tidy control exists and it is always present in the workspace the user is
+  viewing — not only the first workspace.
+  _Verified by: `workspace.spec.ts › the tidy control follows the active workspace`._
 
 ---
 
@@ -83,8 +99,13 @@ in-place HTML input the script swaps in for the badge.
 
 - **TIDY-6** — The prompt caps the number of groups at `clamp(ceil(tabCount / 3), 2, 8)`
   and instructs the model to group by what the user is *doing*, name groups in 1–3 words
-  Title Case, avoid catch-all names (`Misc`/`Other`/`General`/…), and ground every group
-  in the supplied titles/URLs.
+  Title Case, and ground every group in the supplied titles/URLs. Groups must be
+  **expandable categories**, not descriptions of a single tab: the model prefers multi-tab
+  groups and does not make a group as specific as possible. A **single-tab group is allowed
+  only when its name is a real category a future tab could naturally join** (e.g.
+  `Chicken Recipes`, `World of Tanks`) — never when it merely re-describes that one tab.
+  When a tab fits no reasonable category, or many tabs are mutually unrelated, they go into
+  an **`Other`** group, which is a genuine last resort.
   _Verified by: `prompt.spec.ts › caps the group count (floor) at clamp(ceil(tabCount/3), 2, 8)`,
   `› scales the group count cap with the tab count`, and `› carries the grouping and naming
   rubric`._
@@ -104,7 +125,7 @@ in-place HTML input the script swaps in for the badge.
 
 - **TIDY-8** — Plan parsing maps `{ groups: [{ name, tabs: [<index>] }] }` back to real
   tabs. Each tab index is used at most once. Any eligible tab the model omits is collected
-  into a trailing **`Misc`** group so no tab is lost.
+  into the trailing **`Other`** group (see TIDY-13) so no tab is lost.
   _Verified by: `tidying.spec.ts › tidying the tabs actually works`._
 
 - **TIDY-9** — Applying a plan **never nests** one group inside another, and **never shows
@@ -126,6 +147,22 @@ in-place HTML input the script swaps in for the badge.
   rather than left untouched. Status readouts collect ungrouped tabs only.
   _Verified by: `tidying.spec.ts › re-tidying never paints the old groups beneath the new ones`
   (re-tidies already-grouped tabs)._
+
+- **TIDY-13** — **Single-tab group budget.** A spray of one-tab groups is rarely
+  meaningful, so plan parsing caps how many single-tab groups survive: the number of
+  single-tab groups kept is **at most the number of multi-tab groups** (groups with ≥2
+  tabs) in the plan. Single-tab groups are kept in plan order until that budget is
+  exhausted; every tab from a surplus single-tab group, together with any tab the model
+  omitted (TIDY-8), is folded into a single trailing **`Other`** group. `Other` is a last
+  resort and **may itself hold a single tab**.
+  _Verified by: `tidying.spec.ts › collapses surplus single-tab groups into Other`._
+
+- **TIDY-14** — **Each notification dismisses only itself.** A notification is
+  auto-removed after its own display duration (`notifyDurationMs`). Showing a later
+  notification never causes an earlier notification's pending auto-dismissal to remove
+  it: each scheduled dismissal targets the specific notification it was created for, not
+  whichever notification currently occupies the shared `zen-tidy-tabs-msg` slot.
+  _Verified by: `tidy-run.spec.ts › a notification's auto-dismiss never removes a later notification`._
 
 ---
 
@@ -264,8 +301,10 @@ _Verified by: `settings.spec.ts › saved settings persist and are reflected whe
 ## 7. Group appearance
 
 - **LABEL-1** — With `labelstyle = text`, group badges render in an Arc-style text-only
-  form (transparent background, neutral weight). With `labelstyle = filled` (default),
-  badges keep Zen's native coloured style. Changing the setting re-applies immediately.
+  form (transparent background, neutral weight) using the theme's readable tab-text
+  foreground colour (`--toolbox-textcolor`), **not** the accent colour (`--zen-primary-color`)
+  which can be unreadable on some themes. With `labelstyle = filled` (default), badges keep
+  Zen's native coloured style. Changing the setting re-applies immediately.
   _Verified by: `label-style.spec.ts › text labelstyle renders an Arc-style text-only badge`._
 
 ---

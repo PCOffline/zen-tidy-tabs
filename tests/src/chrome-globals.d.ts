@@ -60,6 +60,40 @@ declare global {
 
   const gBrowser: GBrowser;
 
+  /** A Zen workspace record (subset). */
+  interface ZenWorkspace {
+    uuid: string;
+    name: string;
+  }
+
+  /** The subset of Zen's global `gZenWorkspaces` the harness drives (CONTROL-7). */
+  interface GZenWorkspaces {
+    /** UUID of the active workspace. */
+    activeWorkspace: string;
+    /** The active `<zen-workspace>` element, or null before init. */
+    activeWorkspaceElement: Element | null;
+    /** Resolves once workspaces have finished initializing. */
+    promiseInitialized: Promise<unknown>;
+    /** Register a callback fired on every workspace change. */
+    addChangeListeners(
+      fn: (info: { workspace: ZenWorkspace; onInit: boolean }) => void,
+      opts?: { once?: boolean },
+    ): void;
+    removeChangeListeners(fn: (...args: unknown[]) => void): void;
+    /** Create + save a workspace; auto-switches to it unless `dontChange`. */
+    createAndSaveWorkspace(
+      name?: string,
+      icon?: unknown,
+      dontChange?: boolean,
+    ): Promise<ZenWorkspace>;
+    /** Switch to the workspace with the given UUID. */
+    changeWorkspaceWithID(uuid: string, ...args: unknown[]): Promise<unknown>;
+    getWorkspaces(): ZenWorkspace[];
+    removeWorkspace(uuid: string): Promise<unknown> | undefined;
+  }
+
+  const gZenWorkspaces: GZenWorkspaces;
+
   const Services: {
     scriptSecurityManager: { getSystemPrincipal(): unknown };
     prefs: {
@@ -89,6 +123,7 @@ declare global {
 
   interface Window {
     zenTidyTabs: ZenTidyTabsApi;
+    gZenWorkspaces?: GZenWorkspaces;
     __zenTidyTabsOrigFetch?: typeof fetch;
     __zenTidyTabsFetchCalls?: number;
     /** Body of the most recent stubbed fetch request (the OpenRouter payload). */

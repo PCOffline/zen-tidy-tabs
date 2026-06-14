@@ -1,8 +1,9 @@
 import { expect, test } from "../src/fixtures";
 
 // TIDY-6: the prompt caps the group count at clamp(ceil(tabCount/3), 2, 8) and
-// carries the grouping rubric (group by activity, Title Case 1-3 word names, no
-// catch-all names, grounded in the supplied titles/URLs).
+// carries the grouping rubric (group by activity, Title Case 1-3 word names,
+// expandable categories over single-tab descriptions, "Other" as a last resort,
+// grounded in the supplied titles/URLs).
 const PLAN = { groups: [{ name: "Anything", tabs: [0, 1, 2] }] };
 
 /** clamp(ceil(n / 3), 2, 8) — the cap the prompt should advertise. */
@@ -59,8 +60,9 @@ test.describe("Tidy prompt", () => {
     }
   });
 
-  // The rubric: group by activity, Title-Case 1-3 word names, no catch-alls,
-  // grounded in the supplied tabs.
+  // The rubric: group by activity, Title-Case 1-3 word names, expandable
+  // categories over one-tab descriptions, "Other" as a last resort, grounded in
+  // the supplied tabs.
   test("carries the grouping and naming rubric", async ({ zen }) => {
     await zen.openTabs(4, "Rubric ");
     try {
@@ -71,10 +73,12 @@ test.describe("Tidy prompt", () => {
       // 1-3 word Title Case names.
       expect(prompt).toContain("Title Case");
       expect(prompt).toContain("1-3 words");
-      // No catch-all names.
-      expect(prompt).toContain('"Misc"');
+      // Expandable categories, not single-tab descriptions.
+      expect(prompt).toContain("EXPANDABLE CATEGORY");
+      expect(prompt).toContain("Prefer multi-tab groups");
+      // "Other" is the last-resort catch-all.
       expect(prompt).toContain('"Other"');
-      expect(prompt).toContain('"General"');
+      expect(prompt).toContain("LAST RESORT");
       // Grounded in the supplied titles/URLs.
       expect(prompt).toContain("Use ONLY the titles and URLs given");
       expect(prompt).toContain("Every group must be justified by its members");

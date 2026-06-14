@@ -47,6 +47,11 @@
       styleId: "zen-tidy-tabs-style",
       label: "🧹 Tidy",
       busyLabel: "↻ Tidying…",
+      // Zen's own class on the native "Clear" control. The twin copies Clear's
+      // classes for its look, but must NOT keep this one (CONTROL-6): Zen's
+      // bookkeeping does a first-match querySelector for it, and a twin carrying
+      // it would be mistaken for Clear and steal Clear's icon/styling.
+      clearButtonClass: "zen-workspace-close-unpinned-tabs-button",
     },
 
     // Tweaks applied to Zen's native group edit panel (right-click a badge).
@@ -161,6 +166,18 @@
   // one place to update when Zen changes its internals.
   // ============================================================================
   const dom = {
+    // The active workspace element. Zen keeps one <zen-workspace> per workspace
+    // in the DOM (only one is [active]); the native Clear control lives inside
+    // it, so scope lookups here to avoid matching another workspace's controls.
+    activeWorkspaceEl() {
+      return (
+        win.gZenWorkspaces?.activeWorkspaceElement ||
+        doc.querySelector("zen-workspace[active]") ||
+        gBrowser.selectedTab?.closest?.("zen-workspace") ||
+        doc.querySelector("zen-workspace")
+      );
+    },
+
     // The active workspace's tab section. Zen keeps one section per workspace in
     // the DOM; the selected tab lives in the active one, so climb from it.
     activeSection() {
@@ -173,8 +190,12 @@
 
     // Zen's native "Clear" control. It has no stable id/class and may render its
     // text via a `label` attribute or a CSS pseudo-element, so check all three.
+    // Scope to the ACTIVE workspace first: Zen keeps a Clear control per
+    // workspace, and a document-wide first match would always return the first
+    // workspace's Clear, mounting the twin in a workspace the user can't see
+    // (CONTROL-7).
     clearControl() {
-      const scopes = [doc.getElementById("tabbrowser-tabs"), dom.activeSection(), doc].filter(Boolean);
+      const scopes = [dom.activeWorkspaceEl(), dom.activeSection(), doc].filter(Boolean);
       const seen = new Set();
       const selector = "toolbarbutton, button, label, span, hbox, vbox, toolbaritem, [label], [tooltiptext]";
 
@@ -330,8 +351,13 @@
         `  not merely by website. Tabs from different domains often belong`,
         `  together (a wiki page, a YouTube video, and a store page about the`,
         `  same game are one group).`,
-        `- Be specific when a cluster is clearly about one thing: prefer`,
-        `  "Wynncraft" over "Gaming", "ADHD Notes" over "Articles".`,
+        `- Name an EXPANDABLE CATEGORY, not the single tab in front of you. A`,
+        `  group should be something later tabs could naturally join: "Wynncraft"`,
+        `  over "Gaming", "Chicken Recipes" over "Grandma's Chicken Soup". Don't`,
+        `  make a group as specific as possible — as specific as is still reusable.`,
+        `- Prefer multi-tab groups. A single-tab group is fine ONLY when its name`,
+        `  is a real category a later tab could join, never when it just`,
+        `  re-describes that one tab.`,
         `- Keep granularity consistent: groups of roughly comparable size.`,
         `  Avoid one giant catch-all sitting next to several singletons.`,
         `- Merge near-duplicates (the same product, repeated searches) together.`,
@@ -347,14 +373,17 @@
         `## Avoid`,
         `- A vague mega-group holding most tabs.`,
         `- Many one-tab groups when those tabs share an obvious theme.`,
+        `- A one-tab group whose name just describes that tab (a recipe group`,
+        `  named after one dish) instead of an expandable category.`,
         `- Two different groups that mean the same thing.`,
         ``,
         `## Naming`,
         `- 1-3 words, Title Case, human-readable. No emojis, no quotes.`,
         `- Name the shared theme, not a list of the items.`,
-        `- NEVER use "Misc", "Other", "Various", "General", "Web", or "Stuff".`,
-        `  If a tab seems unrelated, give it the most specific name you can or`,
-        `  fold it into the closest genuinely-related group.`,
+        `- "Other" is a LAST RESORT — only for a tab that fits no reasonable`,
+        `  category, or a pile of mutually unrelated tabs. Never reach for it when`,
+        `  a genuine expandable category fits. Avoid "Misc", "Various", "General",`,
+        `  "Web", and "Stuff" entirely; use "Other" if you truly must.`,
         ``,
         `## Hard constraints (must all hold)`,
         `1. Produce between 1 and ${maxGroups} groups (1 is fine if every tab shares one theme).`,
@@ -372,6 +401,9 @@
         ``,
         `Input (all one theme): [{"i":0,"title":"React useEffect docs","url":"react.dev"},{"i":1,"title":"React Router tutorial","url":"reactrouter.com"},{"i":2,"title":"Why my React app re-renders","url":"stackoverflow.com"}]`,
         `Output: {"groups":[{"name":"React","tabs":[0,1,2]}]}`,
+        ``,
+        `Input (one solid theme + unrelated odds and ends): [{"i":0,"title":"Rust ownership - The Rust Book"},{"i":1,"title":"Tokio async tutorial"},{"i":2,"title":"Why won't my future compile - stackoverflow"},{"i":3,"title":"DMV appointment booking"},{"i":4,"title":"Local weather - today"}]`,
+        `Output: {"groups":[{"name":"Rust","tabs":[0,1,2]},{"name":"Other","tabs":[3,4]}]}`,
         ``,
         `Now output only the JSON object.`,
       ].filter((line) => line !== "").join("\n");
@@ -493,7 +525,9 @@
 
     // Parse the model's text into validated [{name, tabs:[<tabEl>]}] groups,
     // mapping indices back to real tab elements and using each tab at most once.
-    // Any tab the model omitted lands in a trailing "Misc" group.
+    // At most (multi-tab group count) single-tab groups survive; surplus
+    // singletons plus any tab the model omitted land in a trailing "Other"
+    // group (TIDY-13).
     parseGroups(text, sourceTabs) {
       const preview = () => text.slice(0, CONFIG.api.outputPreviewMaxChars);
       let parsed;
@@ -524,13 +558,37 @@
         if (members.length) result.push({ name: group.name || "Group", tabs: members });
       }
 
+      // Enforce the single-tab budget: keep at most as many single-tab groups as
+      // there are multi-tab groups, in plan order. Surplus singletons join the
+      // omitted tabs in a trailing "Other" group (TIDY-13).
+      const singletonBudget = result.filter((g) => g.tabs.length >= 2).length;
+      const kept = [];
+      const overflow = [];
+      let singletonsKept = 0;
+      for (const group of result) {
+        if (group.tabs.length >= 2) {
+          kept.push(group);
+        } else if (singletonsKept < singletonBudget) {
+          kept.push(group);
+          singletonsKept++;
+        } else {
+          overflow.push(...group.tabs);
+        }
+      }
+      if (overflow.length) {
+        Log.ai.debug(`Single-tab budget exceeded; folding ${overflow.length} surplus singleton tab(s) into "Other".`);
+      }
+
       const ungrouped = sourceTabs.filter((_, i) => !used.has(i));
       if (ungrouped.length) {
-        Log.ai.debug(`Model left ${ungrouped.length} tab(s) ungrouped; collecting them into a "Misc" group.`);
-        result.push({ name: "Misc", tabs: ungrouped });
+        Log.ai.debug(`Model left ${ungrouped.length} tab(s) ungrouped; collecting them into "Other".`);
       }
-      Log.ai.debug(`Parsed model output into ${result.length} group(s) covering ${used.size + ungrouped.length} tab(s).`);
-      return result;
+      const other = [...overflow, ...ungrouped];
+      if (other.length) {
+        kept.push({ name: "Other", tabs: other });
+      }
+      Log.ai.debug(`Parsed model output into ${kept.length} group(s) covering ${used.size + ungrouped.length} tab(s).`);
+      return kept;
     },
   };
 
@@ -927,7 +985,13 @@
       el.setAttribute("tooltiptext", "Tidy tabs with AI");
       el.title = "Tidy tabs with AI";
       el.className = twin ? twin.className : "zen-tidy-tabs-fallback";
-      if (twin) el.dataset.twin = "1";
+      if (twin) {
+        // Keep Clear's look, but never its control class: Zen's own first-match
+        // querySelector for that class must resolve to the real Clear, not our
+        // twin, or the real Clear loses its icon/styling (CONTROL-6).
+        el.classList.remove(CONFIG.ui.clearButtonClass);
+        el.dataset.twin = "1";
+      }
 
       const tidy = (e) => {
         e.preventDefault();
@@ -946,14 +1010,29 @@
       return el;
     },
 
-    // Insert the control as a twin right next to Clear. Returns true once a twin
-    // is in place. Idempotent: skips work if a twin already exists.
-    placeTwinIfClearPresent() {
+    // True when a twin already exists AND sits immediately before the ACTIVE
+    // workspace's Clear control. A twin left behind in another workspace does
+    // not count, so a workspace switch re-places it (CONTROL-7).
+    twinIsCurrent() {
       const existing = doc.getElementById(CONFIG.ui.controlId);
-      if (existing?.dataset?.twin === "1" && existing.isConnected) return true;
+      if (!(existing?.dataset?.twin === "1" && existing.isConnected)) return false;
+      const clear = dom.clearControl();
+      return (
+        !!clear &&
+        existing.parentElement === clear.parentElement &&
+        existing.nextElementSibling === clear
+      );
+    },
+
+    // Insert the control as a twin right next to the active workspace's Clear.
+    // Returns true once a twin is in place. Idempotent: skips work if the twin
+    // is already current; otherwise removes any stale twin (e.g. left in another
+    // workspace) and re-places it beside the active Clear.
+    placeTwinIfClearPresent() {
+      if (control.twinIsCurrent()) return true;
       const clear = dom.clearControl();
       if (!clear?.parentElement) return false;
-      existing?.remove();
+      doc.getElementById(CONFIG.ui.controlId)?.remove();
       clear.parentElement.insertBefore(control.build(clear), clear);
       Log.dom.info("Tidy control mounted as a twin of the Clear button (" + dom.describe(clear) + ").");
       return true;
@@ -972,14 +1051,36 @@
       Log.dom.debug("Clear-button hover watcher installed on", dom.describe(target) + ".");
     },
 
+    // Zen renders one <zen-workspace> per workspace and swaps the [active] one
+    // on every workspace change. Re-mount on each change so the single Tidy
+    // control follows the user into whichever workspace they're viewing, instead
+    // of staying behind in the first one (CONTROL-7). Registered once; only set
+    // the guard after a successful registration so init can retry if Zen's
+    // workspace API isn't ready yet.
+    installWorkspaceWatcher() {
+      if (win.__zenTidyTabsWorkspaceWatcher) return;
+      const zw = win.gZenWorkspaces;
+      if (typeof zw?.addChangeListeners !== "function") return;
+      win.__zenTidyTabsWorkspaceWatcher = true;
+      zw.addChangeListeners(() => control.mount(), { once: false });
+      Log.dom.debug("Workspace-change watcher installed; Tidy control will follow the active workspace.");
+    },
+
     // Mount: twin beside Clear if present; else a hover-reveal fallback on the
-    // separator; always install the watcher to upgrade to a twin when Clear shows.
+    // separator; always install the watchers so the twin re-appears when Clear
+    // shows and follows the active workspace.
     mount() {
       control.installClearWatcher();
+      control.installWorkspaceWatcher();
       if (control.placeTwinIfClearPresent()) return true;
 
+      // Relocate a stale fallback that belongs to another workspace's section so
+      // exactly one control exists, in the active workspace (CONTROL-7).
+      const existing = doc.getElementById(CONFIG.ui.controlId);
+      const section = dom.activeSection();
+      if (existing && section && !section.contains(existing)) existing.remove();
+
       if (!doc.getElementById(CONFIG.ui.controlId)) {
-        const section = dom.activeSection();
         const anchor = section && dom.firstNormalNode(section);
         if (anchor?.parentElement) {
           anchor.parentElement.insertBefore(control.build(null), anchor);
@@ -1313,13 +1414,13 @@
       return `
         .tab-group-label {
           background: transparent !important;
-          color: var(--zen-primary-color, #ECECEC) !important;
-          opacity: .72;
+          color: var(--toolbox-textcolor, var(--toolbar-color, currentColor)) !important;
+          opacity: .9;
           font-weight: 700 !important;
           letter-spacing: .01em;
           text-shadow: none !important;
         }
-        .tab-group-label:hover { opacity: .9; }
+        .tab-group-label:hover { opacity: 1; }
       `;
     },
 
@@ -1471,7 +1572,7 @@
       (isError ? Log.tidy.error : Log.tidy.info)(message);
       try {
         const box = gBrowser.getNotificationBox();
-        box.appendNotification(
+        const appended = box.appendNotification(
           "zen-tidy-tabs-msg",
           {
             label: "Zen Tidy Tabs: " + message,
@@ -1479,10 +1580,12 @@
           },
           []
         );
-        setTimeout(() => {
-          const note = box.getNotificationWithValue?.("zen-tidy-tabs-msg");
-          if (note) box.removeNotification(note);
-        }, CONFIG.timing.notifyDurationMs);
+        // Auto-dismiss only this specific notification element, so a stale
+        // timer can never remove a later notification. (TIDY-14)
+        Promise.resolve(appended).then((note) => {
+          if (!note) return;
+          setTimeout(() => box.removeNotification(note), CONFIG.timing.notifyDurationMs);
+        });
       } catch {
         /* notification box unavailable — the console log above already fired */
       }

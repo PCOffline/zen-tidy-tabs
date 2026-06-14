@@ -1869,6 +1869,136 @@ export class ZenDriver {
       return true;
     });
   }
+
+  // ---- CONTROL-6: Clear control-class hijack ------------------------------
+
+  /**
+   * Mirror Zen's own first-match `querySelector` for its Clear control class,
+   * scoped to the active workspace. Reports whether a Clear control exists,
+   * whether the Tidy twin (wrongly) carries Zen's control class, and whether
+   * that first match resolves to the twin instead of the real Clear. After the
+   * CONTROL-6 fix the twin must not carry the class and the first match must be
+   * the real Clear.
+   */
+  clearTwinReport(): Promise<{
+    hasClear: boolean;
+    tidyHasClearClass: boolean;
+    firstMatchIsTidy: boolean;
+  }> {
+    return this.exec(
+      (buttonId: string, clearClass: string, workspaceSel: string) => {
+        const scope: Element | Document =
+          (typeof gZenWorkspaces !== "undefined" &&
+            gZenWorkspaces.activeWorkspaceElement) ||
+          document.querySelector(`${workspaceSel}[active]`) ||
+          document.querySelector(workspaceSel) ||
+          document;
+        const twin = document.getElementById(buttonId);
+        const firstMatch = scope.querySelector(`.${clearClass}`);
+        return {
+          hasClear: !!firstMatch,
+          tidyHasClearClass: !!twin && twin.classList.contains(clearClass),
+          firstMatchIsTidy: !!firstMatch && firstMatch === twin,
+        };
+      },
+      S.buttonId,
+      S.clearControlClass,
+      S.workspaceEl,
+    );
+  }
+
+  // ---- CONTROL-7: per-workspace presence ----------------------------------
+
+  /** Whether Zen's workspace API is present and usable in this build. */
+  workspacesAvailable(): Promise<boolean> {
+    return this.exec(
+      () =>
+        typeof gZenWorkspaces !== "undefined" &&
+        typeof gZenWorkspaces.addChangeListeners === "function" &&
+        typeof gZenWorkspaces.createAndSaveWorkspace === "function" &&
+        typeof gZenWorkspaces.changeWorkspaceWithID === "function",
+    );
+  }
+
+  /** UUID of the active workspace. */
+  activeWorkspaceId(): Promise<string> {
+    return this.exec(() => gZenWorkspaces.activeWorkspace);
+  }
+
+  /** Create + save a workspace (Zen auto-switches to it); returns its UUID. */
+  async createWorkspace(name: string): Promise<string> {
+    // `executeScript` awaits a returned promise, so flatten it with `await`.
+    return await this.exec(async (wsName: string) => {
+      const ws = await gZenWorkspaces.createAndSaveWorkspace(wsName);
+      return ws.uuid;
+    }, name);
+  }
+
+  /** Switch to the workspace with the given UUID. */
+  async switchWorkspace(uuid: string): Promise<void> {
+    await this.exec(async (id: string) => {
+      await gZenWorkspaces.changeWorkspaceWithID(id);
+      return true;
+    }, uuid);
+  }
+
+  /** Remove the workspace with the given UUID (cleanup). */
+  async removeWorkspace(uuid: string): Promise<void> {
+    await this.exec(async (id: string) => {
+      await gZenWorkspaces.removeWorkspace(id);
+      return true;
+    }, uuid);
+  }
+
+  /** Whether the single Tidy control lives inside the active workspace element. */
+  buttonInActiveWorkspace(): Promise<boolean> {
+    return this.exec(
+      (buttonId: string, workspaceSel: string) => {
+        const btn = document.getElementById(buttonId);
+        if (!btn) {
+          return false;
+        }
+        const active: Element | null =
+          (typeof gZenWorkspaces !== "undefined" &&
+            gZenWorkspaces.activeWorkspaceElement) ||
+          document.querySelector(`${workspaceSel}[active]`) ||
+          document.querySelector(workspaceSel);
+        // No identifiable workspace element: fall back to mere existence.
+        if (!active) {
+          return true;
+        }
+        return active.contains(btn);
+      },
+      S.buttonId,
+      S.workspaceEl,
+    );
+  }
+
+  /** Wait until the Tidy control is present in the active workspace, nudging mount(). */
+  async waitForButtonInActiveWorkspace(): Promise<void> {
+    await this.driver.wait(
+      async () => {
+        if (await this.buttonInActiveWorkspace()) {
+          return true;
+        }
+        await this.exec(() => {
+          try {
+            window.zenTidyTabs?.mount();
+          } catch {
+            // best effort: the watcher retry below still gets a chance
+          }
+          document.documentElement.dispatchEvent(
+            new MouseEvent("mouseover", { bubbles: true }),
+          );
+          return true;
+        });
+        return false;
+      },
+      15_000,
+      "Tidy control never appeared in the active workspace",
+      400,
+    );
+  }
 }
 
 /**
