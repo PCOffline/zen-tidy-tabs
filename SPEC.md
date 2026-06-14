@@ -42,7 +42,7 @@ in-place HTML input the script swaps in for the badge.
 
 - **CONTROL-4** — While a run is in progress the control shows `↻ Tidying…` and is
   non-interactive (`pointer-events: none`); both revert when the run ends.
-  _Unverified._
+  _Verified by: `tidy-run.spec.ts › the control shows a busy state while a run is in progress`._
 
 - **CONTROL-5** — **Right-click** on the Tidy control opens the Settings modal (§5) and
   suppresses the native context menu.
@@ -54,10 +54,11 @@ in-place HTML input the script swaps in for the badge.
 
 - **TIDY-1** — A run requires a configured OpenRouter API key. With no key, the run
   aborts before any tab collection and surfaces a notification telling the user to set
-  the key. _Unverified._
+  the key. _Verified by: `tidy-run.spec.ts › refuses to run without an API key and notifies`._
 
 - **TIDY-2** — The run is re-entrant-safe: while one run is in progress, further
-  activations are ignored. _Unverified._
+  activations are ignored.
+  _Verified by: `tidy-run.spec.ts › ignores a second activation while a run is in progress`._
 
 - **TIDY-3** — Eligible tabs are collected from the **active workspace only**, and a
   re-tidy reconsiders the *whole* workspace, **including already-grouped tabs**. A tab is
@@ -78,12 +79,17 @@ in-place HTML input the script swaps in for the badge.
     sent.**
   - `group` is included **only** for tabs that are already in a group, and carries that
     group's current name as a *hint* for keeping existing groupings stable (§2 TIDY-7).
-  _Unverified (snapshot shape)._
+  _Verified by: `snapshot.spec.ts › the snapshot has the documented shape and strips query
+  strings`, `› already-grouped tabs carry their group name and ungrouped tabs do not`, and
+  `› the urlmode preference controls whether a url is sent`._
 
 - **TIDY-6** — The prompt caps the number of groups at `clamp(ceil(tabCount / 3), 2, 8)`
   and instructs the model to group by what the user is *doing*, name groups in 1–3 words
   Title Case, avoid catch-all names (`Misc`/`Other`/`General`/…), and ground every group
-  in the supplied titles/URLs. _Unverified._
+  in the supplied titles/URLs.
+  _Verified by: `prompt.spec.ts › caps the group count (floor) at clamp(ceil(tabCount/3), 2, 8)`,
+  `› scales the group count cap with the tab count`, and `› carries the grouping and naming
+  rubric`._
 
 - **TIDY-7** — **Stability of existing groups.** When existing groups are present, the
   prompt instructs the model to keep a sensible existing group, reuse its *exact* name,
@@ -109,7 +115,9 @@ in-place HTML input the script swaps in for the badge.
   _Verified by: `tidying.spec.ts › re-tidying never paints the old groups beneath the new ones`._
 
 - **TIDY-10** — On success the run notifies how many tabs were sorted into how many
-  groups; on failure it notifies the failure. _Unverified._
+  groups; on failure it notifies the failure.
+  _Verified by: `tidy-run.spec.ts › notifies success with the tab and group counts` and
+  `› notifies failure when the model call fails`._
 
 ---
 
@@ -182,6 +190,20 @@ in-place HTML input the script swaps in for the badge.
   hands off to the native panel.
   _Verified by: `group-badge.spec.ts › right-clicking mid-rename opens the native panel and ends the inline edit`._
 
+- **PANEL-3** — **No redundant "Save and close group".** Once the native panel is open,
+  Zen Tidy Tabs hides its **Save and close group** action: for an already-saved group it is
+  indistinguishable from **Delete group**. Guarded by the `CONFIG.panel.hideSaveAndClose`
+  flag so a future Zen change can restore the native action without code edits.
+  _Verified by: `group-badge.spec.ts › the native panel hides the redundant Save and close group action`._
+
+- **PANEL-4** — **"Ungroup tabs" actually ungroups.** Zen's native *Ungroup tabs* action is
+  currently inert (it does nothing). Zen Tidy Tabs intercepts that action in the panel's
+  capture phase, ahead of Zen's own handler, and performs the ungroup itself: every tab is
+  removed from the group (the tabs **stay open**), the now-empty group is dissolved, and the
+  panel closes. Guarded by the `CONFIG.panel.overrideUngroup` flag so it can be handed back
+  to Zen's native handler if Zen fixes it.
+  _Verified by: `group-badge.spec.ts › the native panel's Ungroup tabs action ungroups the group and keeps its tabs`._
+
 ---
 
 ## 5. Settings modal (right-click the Tidy control)
@@ -205,7 +227,8 @@ in-place HTML input the script swaps in for the badge.
   button, Escape, and clicking outside the panel all close it without saving. Focus is
   trapped inside the modal while open.
   _Verified by: `settings.spec.ts › saved settings persist and are reflected when reopened`
-  (save + persistence); close-without-save paths Unverified._
+  (save + persistence), `› closing the settings modal without saving discards changes`
+  (Cancel/✕/Escape/click-outside), and `› focus stays trapped inside the open settings modal`._
 
 - **SETTINGS-4** — Reopening the modal reflects the currently-saved values.
   _Verified by: `settings.spec.ts › saved settings persist and are reflected when reopened`._
@@ -224,7 +247,7 @@ All settings live under `about:config` and are editable both there and via the m
 | `zen-tidy-tabs.urlmode` | `detailed` \| `compact` \| `minimal` | `detailed` | TIDY-5 |
 
 - **PREFS-1** — An unrecognised `urlmode` value falls back to `detailed`.
-  _Unverified._
+  _Verified by: `snapshot.spec.ts › an unrecognised urlmode falls back to detailed`._
 
 _Verified by: `settings.spec.ts › saved settings persist and are reflected when reopened`
 (all four prefs round-trip)._
@@ -236,7 +259,7 @@ _Verified by: `settings.spec.ts › saved settings persist and are reflected whe
 - **LABEL-1** — With `labelstyle = text`, group badges render in an Arc-style text-only
   form (transparent background, neutral weight). With `labelstyle = filled` (default),
   badges keep Zen's native coloured style. Changing the setting re-applies immediately.
-  _Unverified._
+  _Verified by: `label-style.spec.ts › text labelstyle renders an Arc-style text-only badge`._
 
 ---
 
