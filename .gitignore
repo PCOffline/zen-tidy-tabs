@@ -1,3 +1,6 @@
 node_modules/
 .zen-browser/
 .env
+playwright-report/
+test-results/
+coverage/
