@@ -1,0 +1,28 @@
+# Configures the auto-generated notes for `gh release create --generate-notes`.
+# Pull requests are grouped by their labels; give PRs one of these labels to
+# place them in a section. Anything else lands under "Other changes".
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+      - duplicate
+  categories:
+    - title: 🚀 Features
+      labels:
+        - enhancement
+        - feature
+    - title: 🐛 Fixes
+      labels:
+        - bug
+        - fix
+    - title: 📝 Documentation
+      labels:
+        - documentation
+    - title: 🧰 Maintenance
+      labels:
+        - chore
+        - dependencies
+        - refactor
+    - title: Other changes
+      labels:
+        - "*"

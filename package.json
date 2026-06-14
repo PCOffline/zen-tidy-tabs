@@ -1,0 +1,39 @@
+{
+  "name": "zen-tidy-tabs",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Arc-style, AI-powered tab tidying built into Zen Browser's native sidebar (a userChrome.js script), plus its end-to-end test suite.",
+  "homepage": "https://github.com/PCOffline/zen-tidy-tabs",
+  "bugs": "https://github.com/PCOffline/zen-tidy-tabs/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PCOffline/zen-tidy-tabs.git"
+  },
+  "author": "PCOffline",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "cd tests && cross-env ZEN_HEADLESS=1 playwright test",
+    "test:headful": "cd tests && playwright test",
+    "inspect": "cd tests && playwright test -c manual.config.ts",
+    "report": "cd tests && playwright show-report",
+    "typecheck": "cd tests && tsc --noEmit",
+    "lint": "cd tests && biome check .",
+    "format": "cd tests && biome format --write .",
+    "release": "release-it",
+    "release:dry": "release-it --dry-run"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.16",
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^25.9.3",
+    "@types/selenium-webdriver": "^4.35.6",
+    "cross-env": "^10.1.0",
+    "geckodriver": "^6.1.0",
+    "release-it": "^19.0.4",
+    "selenium-webdriver": "^4.44.0",
+    "typescript": "^6.0.3"
+  }
+}
