@@ -54,6 +54,18 @@
       busyLabel: "↻ Tidying…",
     },
 
+    // Tweaks applied to Zen's native group edit panel (right-click a badge).
+    // Both are flag-guarded so a future Zen change can flip them back off
+    // without touching code.
+    panel: {
+      hideSaveAndClose: true, // PANEL-3: hide the redundant "Save and close group"
+      overrideUngroup: true,  // PANEL-4: run "Ungroup tabs" ourselves (Zen's is inert)
+      ids: {
+        saveAndClose: "tabGroupEditor_saveAndCloseGroup",
+        ungroup: "tabGroupEditor_ungroupTabs",
+      },
+    },
+
     grouping: {
       colors: ["blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange", "gray"],
       minTabs: 3,              // refuse to tidy fewer than this
@@ -1007,6 +1019,82 @@
   };
 
   // ============================================================================
+  // Native group edit panel tweaks (right-click a badge opens Zen's own panel).
+  // We open the panel untouched, then apply two changes Zen doesn't offer:
+  //   - hide the redundant "Save and close group" action (PANEL-3): for an
+  //     already-saved group it does the same thing as "Delete group";
+  //   - repair "Ungroup tabs" (PANEL-4): Zen's native action is currently inert,
+  //     so we intercept it in the panel's capture phase and ungroup ourselves.
+  // Both are guarded by CONFIG.panel flags so a future Zen fix can switch them
+  // back to the native behaviour without code edits.
+  // ============================================================================
+  const nativePanel = {
+    // Run once per panel open, right after openEditModal.
+    customize() {
+      if (CONFIG.panel.hideSaveAndClose) nativePanel.hideSaveAndClose();
+      if (CONFIG.panel.overrideUngroup) nativePanel.installUngroupOverride();
+    },
+
+    // Hide Zen's "Save and close group" toolbarbutton. Zen re-runs its own
+    // enable/disable logic on every open but never un-hides it, so setting
+    // hidden here sticks for the life of the panel.
+    hideSaveAndClose() {
+      const btn = doc.getElementById(CONFIG.panel.ids.saveAndClose);
+      if (btn) btn.hidden = true;
+    },
+
+    // Catch the "Ungroup tabs" command in the panel's capture phase, ahead of
+    // Zen's own (inert) handler on the button, and ungroup the group ourselves.
+    // The panel element is reused across opens, so install the listener once.
+    installUngroupOverride() {
+      if (win.__zenTidyTabsPanelOverride) return;
+      const panel = gBrowser.tabGroupMenu?.panel;
+      if (!panel) return;
+      const onCommand = (e) => {
+        if (e.target?.id !== CONFIG.panel.ids.ungroup) return;
+        // Beat (and silence) Zen's button-level handler.
+        e.preventDefault();
+        e.stopPropagation();
+        nativePanel.ungroup(gBrowser.tabGroupMenu?.activeGroup);
+      };
+      panel.addEventListener("command", onCommand, true);
+      win.__zenTidyTabsPanelOverride = { panel, onCommand };
+      Log.user.debug("Installed 'Ungroup tabs' override on the native panel.");
+    },
+
+    // Drop the override (re-eval cleanup); it re-installs on the next panel open.
+    uninstall() {
+      const prev = win.__zenTidyTabsPanelOverride;
+      if (!prev) return;
+      try { prev.panel.removeEventListener("command", prev.onCommand, true); }
+      catch { /* panel already torn down */ }
+      win.__zenTidyTabsPanelOverride = null;
+    },
+
+    // Pull every tab out of `group` (the tabs stay open), dissolve the now-empty
+    // group, and close the panel. Uses the same primitive as the tidier.
+    ungroup(group) {
+      if (!group) return;
+      const name = getGroupName(group);
+      const members = [...getGroupTabs(group)].filter(tabs.isAlive);
+      for (const tab of members) {
+        try { gBrowser.ungroupTab(tab); }
+        catch (e) { Log.user.warn(`Failed to ungroup a tab from "${name}".`, e); }
+      }
+      try {
+        if (!groups.hasLiveTabs(group) && typeof gBrowser.removeTabGroup === "function") {
+          gBrowser.removeTabGroup(group);
+        }
+      } catch (e) {
+        Log.user.debug("removeTabGroup after ungroup failed:", e?.message);
+      }
+      try { gBrowser.tabGroupMenu?.close?.(); }
+      catch { /* panel may already be gone */ }
+      Log.user.info(`Ungrouped ${members.length} tab(s) from "${name}".`);
+    },
+  };
+
+  // ============================================================================
   // Group label editing.
   //   left click  → inline rename (an <input> overlaid on the badge)
   //   right click → Zen's native group edit panel (rename + recolor)
@@ -1029,6 +1117,8 @@
         doc.removeEventListener("contextmenu", prev.onContextMenu, true);
       }
       editor.cancelInline();
+      // Drop the previous load's native-panel override (it re-installs lazily).
+      nativePanel.uninstall();
 
       const onClick = (e) => {
         // XUL fires `click` for the right button too (unlike HTML); without this
@@ -1069,6 +1159,9 @@
         win.setTimeout(() => {
           try {
             gBrowser.tabGroupMenu?.openEditModal(group);
+            // Apply our tweaks (hide "Save and close", repair "Ungroup tabs")
+            // now the native panel is up.
+            nativePanel.customize();
           } catch (err) {
             Log.user.error("Failed to open Zen's native group edit panel.", err);
           }

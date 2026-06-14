@@ -73,4 +73,64 @@ test.describe("Settings", () => {
       await zen.setPref(prefs.apiKey, "sk-or-v1-zen-tidy-tabs-test-key");
     }
   });
+
+  // SETTINGS-3: Cancel, the ✕ button, Escape, and clicking outside the panel
+  // all close the modal without persisting any changes.
+  test("closing the settings modal without saving discards changes", async ({
+    zen,
+  }) => {
+    const apiKeyPref = "zen-tidy-tabs.apikey";
+    const savedKey = await zen.readPref(apiKeyPref);
+    const sentinel = "sk-or-v1-should-never-persist";
+
+    const closers: [string, () => Promise<void>][] = [
+      ["Cancel button", () => zen.clickCancel()],
+      ["✕ button", () => zen.clickModalClose()],
+      ["Escape key", () => zen.pressEscape()],
+      ["click outside", () => zen.clickOutsideModal()],
+    ];
+
+    try {
+      for (const [how, close] of closers) {
+        await zen.rightClickButton();
+        await zen.waitForOverlay();
+        await zen.fillSettings({ apiKey: sentinel });
+
+        await close();
+        await zen.waitForNoOverlay();
+
+        expect(await zen.overlayExists(), `${how} closes the modal`).toBe(
+          false,
+        );
+        expect(
+          await zen.readPref(apiKeyPref),
+          `${how} does not persist changes`,
+        ).toBe(savedKey);
+      }
+    } finally {
+      await zen.setPref(apiKeyPref, savedKey);
+    }
+  });
+
+  // SETTINGS-3: focus is trapped inside the modal while it is open.
+  test("focus stays trapped inside the open settings modal", async ({
+    zen,
+  }) => {
+    try {
+      await zen.rightClickButton();
+      await zen.waitForOverlay();
+
+      const trap = await zen.modalFocusTrap();
+      expect(trap.forward, "Tab from the last control wraps to the first").toBe(
+        true,
+      );
+      expect(
+        trap.backward,
+        "Shift+Tab from the first control wraps to the last",
+      ).toBe(true);
+    } finally {
+      await zen.pressEscape();
+      await zen.waitForNoOverlay();
+    }
+  });
 });

@@ -95,6 +95,52 @@ test.describe("Group badge editing", () => {
     expect(await zen.labelIsEditing(original)).toBe(false);
   });
 
+  // PANEL-3: the redundant "Save and close group" action is hidden.
+  test("the native panel hides the redundant Save and close group action", async ({
+    zen,
+  }) => {
+    const label = "Save Hidden";
+    await zen.createGroup(label, "blue", 2);
+
+    await zen.rightClickStartedInlineEdit(label);
+    await zen.waitForEditPanel();
+
+    // Delete group stays; Save and close group is hidden (same effect for an
+    // already-saved group).
+    expect(
+      await zen.nativePanelButtonExists("tabGroupEditor_deleteGroup"),
+      "Delete group must remain available",
+    ).toBe(true);
+    expect(
+      await zen.nativePanelButtonHidden("tabGroupEditor_saveAndCloseGroup"),
+    ).toBe(true);
+  });
+
+  // PANEL-4: Ungroup tabs actually ungroups (Zen's native action is inert).
+  test("the native panel's Ungroup tabs action ungroups the group and keeps its tabs", async ({
+    zen,
+  }) => {
+    const label = "Ungroup Me";
+    await zen.createGroup(label, "blue", 3);
+    const eligibleBefore = await zen.collectCount();
+
+    await zen.rightClickStartedInlineEdit(label);
+    await zen.waitForEditPanel();
+
+    await zen.activatePanelButton("tabGroupEditor_ungroupTabs");
+
+    // The group dissolves...
+    await zen.driver.wait(
+      async () => !(await zen.groupLabelExists(label)),
+      5_000,
+      `group "${label}" was not ungrouped`,
+      150,
+    );
+    expect(await zen.groupLabelExists(label)).toBe(false);
+    // ...but every tab stays open (ungrouped, still eligible to tidy).
+    expect(await zen.collectCount()).toBe(eligibleBefore);
+  });
+
   // ---- durability: rapid and erratic gestures ------------------------------
 
   test("spam left-clicks keep the badge inline and never open the panel", async ({

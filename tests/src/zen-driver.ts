@@ -1152,12 +1152,65 @@ export class ZenDriver {
       }
       menu.panel?.hidePopup();
     });
+    // Wait for the panel to be *fully* closed, not merely not-"open". The panel
+    // is a worker-shared singleton, so resolving while it's still in the
+    // transitional "hiding" state lets the next test's openPopup race the
+    // tear-down and silently drop -- surfacing as "panel did not open".
     await this.driver.wait(
-      async () => (await this.editPanelState()) !== "open",
+      async () => {
+        const state = await this.editPanelState();
+        return state === null || state === "closed";
+      },
       5_000,
-      "Zen's native group edit panel did not close",
+      "Zen's native group edit panel did not fully close",
       150,
     );
+  }
+
+  /**
+   * Whether the native panel's action button with `id` is hidden.
+   *
+   * The script hides the redundant "Save and close group" action (PANEL-3) by
+   * setting `hidden` on Zen's `#tabGroupEditor_saveAndCloseGroup` toolbarbutton,
+   * so this reads that element's hidden state directly.
+   */
+  nativePanelButtonHidden(id: string): Promise<boolean> {
+    return this.exec((buttonId: string) => {
+      const el = document.getElementById(buttonId);
+      if (!el) {
+        return false;
+      }
+      return (
+        (el as { hidden?: boolean }).hidden === true ||
+        el.getAttribute("hidden") === "true"
+      );
+    }, id);
+  }
+
+  /** Whether the native panel's action button with `id` exists in the DOM. */
+  nativePanelButtonExists(id: string): Promise<boolean> {
+    return this.exec(
+      (buttonId: string) => !!document.getElementById(buttonId),
+      id,
+    );
+  }
+
+  /**
+   * Fire a `command` on the native panel's action button with `id`, the same
+   * event a real activation dispatches. Bubbles so the script's capture-phase
+   * override on the panel sees it (PANEL-4).
+   */
+  async activatePanelButton(id: string): Promise<void> {
+    await this.exec((buttonId: string) => {
+      const el = document.getElementById(buttonId);
+      if (!el) {
+        return false;
+      }
+      el.dispatchEvent(
+        new Event("command", { bubbles: true, cancelable: true }),
+      );
+      return true;
+    }, id);
   }
 
   /**
@@ -1415,6 +1468,86 @@ export class ZenDriver {
     );
   }
 
+  /** Click the modal's "Cancel" (ghost) button. */
+  async clickCancel(): Promise<void> {
+    await this.exec(() => {
+      document
+        .querySelector<HTMLButtonElement>(".zen-tidy-tabs-btn.ghost")
+        ?.click();
+      return true;
+    });
+  }
+
+  /** Click the modal's "✕" close button. */
+  async clickModalClose(): Promise<void> {
+    await this.exec(() => {
+      document
+        .querySelector<HTMLButtonElement>(".zen-tidy-tabs-modal-close")
+        ?.click();
+      return true;
+    });
+  }
+
+  /** Press the mouse on the overlay backdrop (outside the panel) to dismiss. */
+  async clickOutsideModal(): Promise<void> {
+    await this.exec((overlayId: string) => {
+      const overlay = document.getElementById(overlayId);
+      // The handler only closes when e.target === overlay, so dispatch directly
+      // on the overlay element rather than a descendant.
+      overlay?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      return true;
+    }, S.overlayId);
+  }
+
+  /**
+   * Exercise the modal's Tab focus trap in-page: from the last focusable
+   * element, Tab should wrap to the first; from the first, Shift+Tab should
+   * wrap to the last.
+   */
+  modalFocusTrap(): Promise<{ forward: boolean; backward: boolean }> {
+    return this.exec((panelSel: string) => {
+      const panel = document.querySelector(panelSel);
+      if (!panel) {
+        return { forward: false, backward: false };
+      }
+      const focusable = [
+        ...panel.querySelectorAll<HTMLElement>(
+          "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
+        ),
+      ].filter(
+        (el) => !(el as HTMLButtonElement).disabled && el.offsetParent !== null,
+      );
+      if (focusable.length < 2) {
+        return { forward: false, backward: false };
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) {
+        return { forward: false, backward: false };
+      }
+      last.focus();
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Tab",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      const forward = document.activeElement === first;
+      first.focus();
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Tab",
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      const backward = document.activeElement === last;
+      return { forward, backward };
+    }, S.modal);
+  }
+
   // ---- preferences -------------------------------------------------------
 
   /** Read a string preference (the script persists settings via Services.prefs). */
@@ -1440,13 +1573,136 @@ export class ZenDriver {
     );
   }
 
+  // ---- tidy run / snapshot / appearance ----------------------------------
+
+  /** Trigger a tidy run programmatically (window.zenTidyTabs.run()). */
+  async runTidy(): Promise<void> {
+    await this.exec(() => {
+      window.zenTidyTabs.run();
+      return true;
+    });
+  }
+
+  /** The Tidy control's current label text and inline pointer-events value. */
+  buttonBusyState(): Promise<{ label: string; pointerEvents: string }> {
+    return this.exec((id: string) => {
+      const el = document.getElementById(id);
+      if (!el) {
+        return { label: "", pointerEvents: "" };
+      }
+      return {
+        label: (el.textContent || "").trim(),
+        pointerEvents: (el as HTMLElement).style.pointerEvents,
+      };
+    }, S.buttonId);
+  }
+
+  /** Text of the script's current notification (value "zen-tidy-tabs-msg"), or null. */
+  lastNotification(): Promise<string | null> {
+    return this.exec(() => {
+      try {
+        const box = gBrowser.getNotificationBox();
+        const note = box.getNotificationWithValue?.("zen-tidy-tabs-msg");
+        if (!note) {
+          return null;
+        }
+        return (
+          note.messageText?.textContent ??
+          note.label ??
+          note.getAttribute?.("label") ??
+          null
+        );
+      } catch {
+        return null;
+      }
+    });
+  }
+
+  /** Remove any of the script's notifications so a test starts from a clean box. */
+  async clearNotifications(): Promise<void> {
+    await this.exec(() => {
+      try {
+        const box = gBrowser.getNotificationBox();
+        let note = box.getNotificationWithValue?.("zen-tidy-tabs-msg");
+        let guard = 0;
+        while (note && guard++ < 20) {
+          box.removeNotification?.(note);
+          note = box.getNotificationWithValue?.("zen-tidy-tabs-msg");
+        }
+      } catch {
+        // notification box unavailable; nothing to clear
+      }
+      return true;
+    });
+  }
+
+  /** Open ungrouped tabs at the exact URLs given; wait until they are eligible. */
+  async openTabsRaw(urls: string[]): Promise<void> {
+    await this.exec((list: string[]) => {
+      const principal = Services.scriptSecurityManager.getSystemPrincipal();
+      for (const url of list) {
+        if (typeof gBrowser.addTrustedTab === "function") {
+          gBrowser.addTrustedTab(url);
+        } else {
+          gBrowser.addTab(url, { triggeringPrincipal: principal });
+        }
+      }
+      return true;
+    }, urls);
+    await this.driver.wait(
+      async () => (await this.collectCount()) >= urls.length,
+      15_000,
+      `fewer than ${urls.length} eligible tabs after opening`,
+      300,
+    );
+  }
+
+  /** Re-inject the script's stylesheet (window.zenTidyTabs.injectStyles()). */
+  async injectStyles(): Promise<void> {
+    await this.exec(() => {
+      window.zenTidyTabs.injectStyles();
+      return true;
+    });
+  }
+
+  /** Full text of the script's injected <style> element. */
+  injectedStyleText(): Promise<string> {
+    return this.exec(
+      (id: string) => document.getElementById(id)?.textContent ?? "",
+      S.styleId,
+    );
+  }
+
+  /** Computed value of `prop` on the first rendered group label, or "". */
+  groupLabelComputed(prop: string): Promise<string> {
+    return this.exec(
+      (sel: string, p: string) => {
+        const el = document.querySelector(sel);
+        if (!el) {
+          return "";
+        }
+        return window.getComputedStyle(el).getPropertyValue(p).trim();
+      },
+      S.groupLabel,
+      prop,
+    );
+  }
+
   // ---- network stub ------------------------------------------------------
 
   /**
    * Replace the chrome window's fetch with one that returns a canned
    * OpenRouter chat-completion whose content is `grouping` (a {groups:[...]} obj).
+   *
+   * Every call records the request body on `window.__zenTidyTabsLastBody` so a
+   * test can inspect the snapshot/prompt the script sent (TIDY-5, TIDY-6).
+   * With `{ defer: true }` the stub holds the response open until `releaseFetch()`
+   * is called, so a test can observe the in-flight state (CONTROL-4, TIDY-2).
    */
-  async installFetchStub(grouping: GroupingPlan): Promise<void> {
+  async installFetchStub(
+    grouping: GroupingPlan,
+    opts: { defer?: boolean } = {},
+  ): Promise<void> {
     const content = JSON.stringify(grouping);
     const payload = JSON.stringify({
       id: "zen-tidy-tabs-stub",
@@ -1460,23 +1716,108 @@ export class ZenDriver {
       ],
       usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
     });
-    await this.exec((body: string) => {
-      if (!window.__zenTidyTabsOrigFetch) {
-        window.__zenTidyTabsOrigFetch = window.fetch;
-      }
-      window.__zenTidyTabsFetchCalls = 0;
-      window.fetch = () => {
-        window.__zenTidyTabsFetchCalls =
-          (window.__zenTidyTabsFetchCalls ?? 0) + 1;
-        return Promise.resolve(
-          new Response(body, {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }),
-        );
-      };
+    await this.exec(
+      (body: string, defer: boolean) => {
+        if (!window.__zenTidyTabsOrigFetch) {
+          window.__zenTidyTabsOrigFetch = window.fetch;
+        }
+        window.__zenTidyTabsFetchCalls = 0;
+        window.__zenTidyTabsLastBody = null;
+        window.__zenTidyTabsRelease = undefined;
+        window.fetch = (_url: unknown, init?: { body?: unknown }) => {
+          window.__zenTidyTabsFetchCalls =
+            (window.__zenTidyTabsFetchCalls ?? 0) + 1;
+          window.__zenTidyTabsLastBody =
+            init?.body == null ? null : String(init.body);
+          const respond = () =>
+            new Response(body, {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            });
+          if (defer) {
+            return new Promise<Response>((resolve) => {
+              window.__zenTidyTabsRelease = () => resolve(respond());
+            });
+          }
+          return Promise.resolve(respond());
+        };
+        return true;
+      },
+      payload,
+      !!opts.defer,
+    );
+  }
+
+  /**
+   * Replace fetch with one that returns an HTTP error, so a run fails inside
+   * ai.post() and the orchestrator surfaces a failure notification (TIDY-10).
+   */
+  async installFetchErrorStub(
+    status = 500,
+    body = "stub error",
+  ): Promise<void> {
+    await this.exec(
+      (errStatus: number, errBody: string) => {
+        if (!window.__zenTidyTabsOrigFetch) {
+          window.__zenTidyTabsOrigFetch = window.fetch;
+        }
+        window.__zenTidyTabsFetchCalls = 0;
+        window.fetch = () => {
+          window.__zenTidyTabsFetchCalls =
+            (window.__zenTidyTabsFetchCalls ?? 0) + 1;
+          return Promise.resolve(
+            new Response(errBody, {
+              status: errStatus,
+              headers: { "Content-Type": "text/plain" },
+            }),
+          );
+        };
+        return true;
+      },
+      status,
+      body,
+    );
+  }
+
+  /** Release a deferred fetch stub installed with `{ defer: true }`. */
+  async releaseFetch(): Promise<void> {
+    await this.exec(() => {
+      window.__zenTidyTabsRelease?.();
       return true;
-    }, payload);
+    });
+  }
+
+  /** Raw body of the most recent stubbed fetch request, or null. */
+  lastRequestBody(): Promise<string | null> {
+    return this.exec(() => window.__zenTidyTabsLastBody ?? null);
+  }
+
+  /** The user-message prompt text of the most recent stubbed request. */
+  async lastRequestPrompt(): Promise<string> {
+    const body = await this.lastRequestBody();
+    if (!body) {
+      throw new Error("no request body was captured by the fetch stub");
+    }
+    const parsed = JSON.parse(body) as {
+      messages?: { role: string; content: string }[];
+    };
+    const user = parsed.messages?.find((m) => m.role === "user");
+    if (!user) {
+      throw new Error("captured request had no user message");
+    }
+    return user.content;
+  }
+
+  /** The `<tabs>` snapshot array embedded in the most recent request prompt. */
+  async lastRequestSnapshot(): Promise<
+    { i: number; title: string; url?: string; group?: string }[]
+  > {
+    const prompt = await this.lastRequestPrompt();
+    const match = prompt.match(/<tabs>\s*([\s\S]*?)\s*<\/tabs>/);
+    if (!match || match[1] === undefined) {
+      throw new Error("prompt did not contain a <tabs> snapshot block");
+    }
+    return JSON.parse(match[1]);
   }
 
   /** How many times the installed fetch stub has been invoked. */
@@ -1491,6 +1832,8 @@ export class ZenDriver {
         window.__zenTidyTabsOrigFetch = undefined;
       }
       window.__zenTidyTabsFetchCalls = 0;
+      window.__zenTidyTabsLastBody = null;
+      window.__zenTidyTabsRelease = undefined;
       return true;
     });
   }

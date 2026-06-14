@@ -43,6 +43,18 @@ declare global {
       panel?: { state: string; hidePopup(): void };
       close?(): void;
     };
+    /** Zen's per-window notification box (used by orchestrator.notify). */
+    getNotificationBox(): {
+      getNotificationWithValue?(value: string): NotificationElement | null;
+      removeNotification?(note: NotificationElement): void;
+    };
+  }
+
+  /** A notification element returned by the notification box. */
+  interface NotificationElement {
+    messageText?: { textContent?: string };
+    label?: string;
+    getAttribute?(name: string): string | null;
   }
 
   const gBrowser: GBrowser;
@@ -78,6 +90,10 @@ declare global {
     zenTidyTabs: ZenTidyTabsApi;
     __zenTidyTabsOrigFetch?: typeof fetch;
     __zenTidyTabsFetchCalls?: number;
+    /** Body of the most recent stubbed fetch request (the OpenRouter payload). */
+    __zenTidyTabsLastBody?: string | null;
+    /** Resolves a deferred fetch stub so the in-flight run can complete. */
+    __zenTidyTabsRelease?: () => void;
     __zenTidyReTidyWatch?: ReTidyWatchState;
   }
 }
