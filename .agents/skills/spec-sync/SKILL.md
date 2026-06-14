@@ -5,7 +5,7 @@ description: Keep SPEC.md, the tests, and the code in lockstep for Zen Tidy Tabs
 
 # Spec Sync
 
-`SPEC.md` at the repo root is the **single source of truth** for Zen Tidy Tabs'
+`SPEC.md` at `docs/` is the **single source of truth** for Zen Tidy Tabs'
 behaviour. The tests under `tests/specs/` exist only to verify clauses in `SPEC.md`.
 This skill keeps the three in lockstep.
 
