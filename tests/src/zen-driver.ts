@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Builder, By, type WebElement } from "selenium-webdriver";
+import { Builder, By, Key, type WebElement } from "selenium-webdriver";
 import * as firefox from "selenium-webdriver/firefox.js";
 import { selectors as S } from "./selectors";
 
@@ -61,6 +61,12 @@ export class ZenDriver {
    * same way.
    */
   private readonly headless = process.env.ZEN_HEADLESS === "1";
+
+  /** Whether this run is headless. Real pointer/keyboard input is unreliable
+   *  headless, so real-input specs skip themselves when this is true. */
+  get isHeadless(): boolean {
+    return this.headless;
+  }
 
   constructor(driver: firefox.Driver) {
     this.driver = driver;
@@ -530,19 +536,6 @@ export class ZenDriver {
     );
   }
 
-  /** Color (named) of the group whose label === `label`, or null. */
-  groupColor(label: string): Promise<string | null> {
-    return this.exec((want: string) => {
-      for (const g of document.querySelectorAll<MozTabGroup>("tab-group")) {
-        const l = (g.label || g.getAttribute("label") || "").trim();
-        if (l === want) {
-          return g.color || g.getAttribute("color") || "";
-        }
-      }
-      return null;
-    }, label);
-  }
-
   /** Number of live tabs inside the group whose label === `label`. */
   groupTabCount(label: string): Promise<number> {
     return this.exec((want: string) => {
@@ -685,7 +678,10 @@ export class ZenDriver {
   /** Single left click on a group badge (with a dispatched fallback). */
   async clickLabelOnce(label: string): Promise<InteractionKind> {
     const el = await this.labelElement(label);
-    if (await this.tryNative(() => el.click())) {
+    if (
+      (await this.tryNative(() => el.click())) &&
+      (await this.labelEntersEditing(label))
+    ) {
       return "native";
     }
     await this.dispatchLabelEvents(label, ["click"]);
@@ -705,22 +701,74 @@ export class ZenDriver {
     return "dispatched";
   }
 
-  /** Right click on a group badge (with a dispatched fallback). */
-  async rightClickLabel(label: string): Promise<InteractionKind> {
-    const el = await this.labelElement(label);
-    if (
-      (await this.tryNative(() => this.actions().contextClick(el).perform())) &&
-      (await this.overlayAppeared())
-    ) {
-      return "native";
-    }
-    await this.dispatchLabelEvents(label, ["contextmenu"]);
-    return "dispatched";
+  /**
+   * Dispatch a faithful right click and report, *in the same chrome call*,
+   * whether it brought the inline-rename input into the DOM.
+   *
+   * The check must be synchronous with the gesture: the script opens the native
+   * panel on a deferred tick, and opening it tears any stray inline input back
+   * down -- so a separate round-trip (a later {@link inlineInputExists}) would
+   * miss the transient input and report a false pass. This is the exact gap that
+   * let "right click edits inline" ship green. Returns true if a right click
+   * wrongly started an inline edit.
+   */
+  rightClickStartedInlineEdit(label: string): Promise<boolean> {
+    return this.exec(
+      (
+        groupSel: string,
+        labelSel: string,
+        inputSel: string,
+        want: string,
+        seq: Array<{ type: string; button: number }>,
+      ) => {
+        let group: Element | null = null;
+        for (const g of document.querySelectorAll(groupSel)) {
+          if (
+            (
+              (g as MozTabGroup).label ||
+              g.getAttribute("label") ||
+              ""
+            ).trim() === want
+          ) {
+            group = g;
+            break;
+          }
+        }
+        if (!group) {
+          return false;
+        }
+        const target = group.querySelector<HTMLElement>(labelSel);
+        if (!target) {
+          return false;
+        }
+        for (const spec of seq) {
+          target.dispatchEvent(
+            new MouseEvent(spec.type, {
+              bubbles: true,
+              cancelable: true,
+              button: spec.button,
+              buttons: spec.button === 2 ? 2 : 1,
+            }),
+          );
+        }
+        // Synchronous with the gesture, before the deferred panel-open can tear
+        // a stray inline edit down.
+        return !!group.querySelector(inputSel);
+      },
+      "tab-group",
+      S.groupLabel,
+      S.inlineInput,
+      label,
+      this.rightClickSequence(),
+    );
   }
 
   /** Fire a rapid burst of `times` left clicks on a badge. */
   async spamClickLabel(label: string, times: number): Promise<InteractionKind> {
-    await this.dispatchLabelEvents(label, Array(times).fill("click"));
+    await this.dispatchLabelEvents(
+      label,
+      Array(times).fill({ type: "click", button: 0 }),
+    );
     return "dispatched";
   }
 
@@ -730,8 +778,8 @@ export class ZenDriver {
     times: number,
   ): Promise<InteractionKind> {
     const gestures = Array.from({ length: times }, (_, i) =>
-      i % 2 === 0 ? "click" : "contextmenu",
-    );
+      i % 2 === 0 ? [{ type: "click", button: 0 }] : this.rightClickSequence(),
+    ).flat();
     await this.dispatchLabelEvents(label, gestures);
     return "dispatched";
   }
@@ -757,10 +805,14 @@ export class ZenDriver {
   /** Dispatch a sequence of mouse events on a badge in chrome context. */
   private async dispatchLabelEvents(
     label: string,
-    types: string[],
+    types: Array<string | { type: string; button: number }>,
   ): Promise<void> {
     await this.exec(
-      (labelSel: string, want: string, eventTypes: string[]) => {
+      (
+        labelSel: string,
+        want: string,
+        eventTypes: Array<string | { type: string; button: number }>,
+      ) => {
         let target: HTMLElement | null = null;
         for (const lab of document.querySelectorAll<HTMLElement>(labelSel)) {
           const g = lab.closest<MozTabGroup>("tab-group");
@@ -772,9 +824,16 @@ export class ZenDriver {
         if (!target) {
           return false;
         }
-        for (const type of eventTypes) {
+        for (const spec of eventTypes) {
+          const type = typeof spec === "string" ? spec : spec.type;
+          const button = typeof spec === "string" ? 0 : spec.button;
           target.dispatchEvent(
-            new MouseEvent(type, { bubbles: true, cancelable: true }),
+            new MouseEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              button,
+              buttons: button === 2 ? 2 : 1,
+            }),
           );
         }
         return true;
@@ -785,107 +844,404 @@ export class ZenDriver {
     );
   }
 
-  /** Whether the badge for `label` is currently in inline-edit mode. */
-  labelIsEditing(label: string): Promise<boolean> {
+  /**
+   * The full event sequence Gecko fires for a real right click on the XUL
+   * badge. Crucially this includes a `click` with `button: 2` -- Gecko
+   * dispatches a click for the right button on XUL elements -- which is what a
+   * faithful right-click test must reproduce. A naive `contextmenu`-only
+   * dispatch hid the bug where a right click also started an inline rename.
+   */
+  private rightClickSequence(): Array<{ type: string; button: number }> {
+    return [
+      { type: "mousedown", button: 2 },
+      { type: "contextmenu", button: 2 },
+      { type: "mouseup", button: 2 },
+      { type: "click", button: 2 },
+    ];
+  }
+
+  /**
+   * Width (px) of the live inline input for `label`, and of the tab strip that
+   * contains it. Lets a test assert the field hugs its text rather than
+   * stretching to fill the sidebar.
+   */
+  inlineMetrics(label: string): Promise<{ input: number; strip: number }> {
     return this.exec(
-      (labelSel: string, want: string, editingClass: string) => {
-        for (const lab of document.querySelectorAll<HTMLElement>(labelSel)) {
-          const g = lab.closest<MozTabGroup>("tab-group");
-          if (!g) {
+      (groupSel: string, inputSel: string, stripSel: string, want: string) => {
+        const strip = document.querySelector(stripSel);
+        const stripW = strip ? strip.getBoundingClientRect().width : 0;
+        for (const g of document.querySelectorAll<MozTabGroup>(groupSel)) {
+          if ((g.label || g.getAttribute("label") || "").trim() !== want) {
             continue;
           }
-          if ((g.label || g.getAttribute("label") || "").trim() === want) {
-            return (
-              lab.classList.contains(editingClass) &&
-              lab.getAttribute("contenteditable") === "true"
-            );
-          }
+          const input = g.querySelector<HTMLInputElement>(inputSel);
+          return {
+            input: input ? input.getBoundingClientRect().width : 0,
+            strip: stripW,
+          };
         }
-        return false;
+        return { input: 0, strip: stripW };
       },
-      S.groupLabel,
+      "tab-group",
+      S.inlineInput,
+      "#tabbrowser-tabs",
       label,
-      S.inlineEditingClass,
     );
   }
 
   /**
-   * Replace the inline editor's text with `newName` and commit it.
+   * Set the inline input's value and fire `input` (no Enter, no commit), so the
+   * field re-sizes to the new text. Used to check grow-with-text behaviour.
+   */
+  async setInlineValue(label: string, text: string): Promise<void> {
+    await this.exec(
+      (groupSel: string, inputSel: string, want: string, value: string) => {
+        for (const g of document.querySelectorAll<MozTabGroup>(groupSel)) {
+          if ((g.label || g.getAttribute("label") || "").trim() !== want) {
+            continue;
+          }
+          const input = g.querySelector<HTMLInputElement>(inputSel);
+          if (input) {
+            input.value = value;
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          return;
+        }
+      },
+      "tab-group",
+      S.inlineInput,
+      label,
+      text,
+    );
+  }
+
+  /**
+   * Whether the badge for `label` is currently in inline-edit mode.
    *
-   * Selenium's native keyboard can't reach chrome XUL/contenteditable elements,
-   * so we drive the editor the way the script itself expects: set the label's
-   * text, then dispatch an Enter keydown. The editor's keydown handler calls
-   * `labelEl.blur()`, whose `blur` listener performs the actual rename.
+   * The inline editor is a real HTML <input> that replaces the (XUL, and so
+   * non-editable) label, so "editing" means the input exists and actually holds
+   * focus -- the focus check is what the old contenteditable approach silently
+   * failed.
+   */
+  labelIsEditing(label: string): Promise<boolean> {
+    return this.exec(
+      (groupSel: string, inputSel: string, want: string) => {
+        for (const g of document.querySelectorAll<MozTabGroup>(groupSel)) {
+          if ((g.label || g.getAttribute("label") || "").trim() !== want) {
+            continue;
+          }
+          const input = g.querySelector<HTMLInputElement>(inputSel);
+          return !!input && document.activeElement === input;
+        }
+        return false;
+      },
+      "tab-group",
+      S.inlineInput,
+      label,
+    );
+  }
+
+  /**
+   * Whether the inline-rename <input> exists for `label`, regardless of focus.
+   *
+   * {@link labelIsEditing} additionally requires the input to hold focus, which
+   * doesn't stick under synthetic dispatch -- so a right click that wrongly
+   * *creates* the input (then loses focus) reads as "not editing" there. This
+   * existence check is what catches that bug: a right click must never bring the
+   * inline input into the DOM at all, not even transiently.
+   */
+  inlineInputExists(label: string): Promise<boolean> {
+    return this.exec(
+      (groupSel: string, inputSel: string, want: string) => {
+        for (const g of document.querySelectorAll<MozTabGroup>(groupSel)) {
+          if ((g.label || g.getAttribute("label") || "").trim() !== want) {
+            continue;
+          }
+          return !!g.querySelector(inputSel);
+        }
+        return false;
+      },
+      "tab-group",
+      S.inlineInput,
+      label,
+    );
+  }
+
+  /** Whether the chrome root carries the inline-edit marker class (BADGE-7). */
+  editingRootMarked(): Promise<boolean> {
+    return this.exec(() =>
+      document.documentElement.classList.contains("zen-tidy-tabs-editing"),
+    );
+  }
+
+  /** Whether the named group's `tab-group` element is collapsed. */
+  groupIsCollapsed(label: string): Promise<boolean> {
+    return this.exec(
+      (lbl: string) =>
+        !!document
+          .querySelector(`tab-group[label="${lbl}"]`)
+          ?.hasAttribute("collapsed"),
+      label,
+    );
+  }
+
+  /**
+   * Dispatch a left click on the active inline-rename input. Mirrors the second
+   * click of a double-click, which lands on the input because the badge is
+   * hidden behind it (BADGE-8).
+   */
+  clickInlineInput(): Promise<boolean> {
+    return this.exec((inputSel: string) => {
+      const input = document.querySelector(inputSel);
+      if (!input) {
+        return false;
+      }
+      input.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }),
+      );
+      return true;
+    }, S.inlineInput);
+  }
+
+  /**
+   * Whether the script's injected CSS carries the BADGE-7 rule that forces Zen's
+   * empty sidebar to `no-drag` while editing. Gecko doesn't expose
+   * `-moz-window-dragging` through `getComputedStyle`, so we verify the rule is
+   * wired by reading it back from the stylesheet text instead.
+   */
+  hasDragOverrideRule(): Promise<boolean> {
+    return this.exec(() => {
+      for (const style of document.querySelectorAll("style")) {
+        const css = style.textContent || "";
+        if (
+          css.includes("zen-tidy-tabs-editing") &&
+          css.includes(".zen-workspace-empty-space") &&
+          css.includes("-moz-window-dragging")
+        ) {
+          return true;
+        }
+      }
+      return false;
+    });
+  }
+
+  /**
+   * Type `newName` into the inline editor and commit it with Enter.
+   *
+   * The editor is a real HTML <input>, so we set its value and dispatch an Enter
+   * keydown; the script's keydown handler reads `input.value` and renames the
+   * group.
    */
   async commitInlineRename(label: string, newName: string): Promise<void> {
     await this.exec(
-      (labelSel: string, want: string, name: string) => {
-        let target: HTMLElement | null = null;
-        for (const lab of document.querySelectorAll<HTMLElement>(labelSel)) {
-          const g = lab.closest<MozTabGroup>("tab-group");
-          if (g && (g.label || g.getAttribute("label") || "").trim() === want) {
-            target = lab;
+      (groupSel: string, inputSel: string, want: string, name: string) => {
+        let input: HTMLInputElement | null = null;
+        for (const g of document.querySelectorAll<MozTabGroup>(groupSel)) {
+          if ((g.label || g.getAttribute("label") || "").trim() === want) {
+            input = g.querySelector<HTMLInputElement>(inputSel);
             break;
           }
         }
-        if (!target) {
+        if (!input) {
           return false;
         }
-        target.focus();
-        target.textContent = name;
-        target.dispatchEvent(
+        input.focus();
+        input.value = name;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(
           new KeyboardEvent("keydown", {
             key: "Enter",
             bubbles: true,
             cancelable: true,
           }),
         );
-        // Belt and braces: if the element never held focus, blur() above is a
-        // no-op, so fire the commit listener directly.
-        target.dispatchEvent(new FocusEvent("blur"));
         return true;
       },
-      S.groupLabel,
+      "tab-group",
+      S.inlineInput,
       label,
       newName,
     );
   }
 
   /**
-   * Type `typed` into the inline editor, then press Escape. The editor's keydown
-   * handler restores the original text and blurs, so no rename is committed.
+   * Type `typed` into the inline editor, then press Escape. The script's keydown
+   * handler discards the edit, so no rename is committed.
    */
   async cancelInlineRename(label: string, typed: string): Promise<void> {
     await this.exec(
-      (labelSel: string, want: string, typedText: string) => {
-        let target: HTMLElement | null = null;
-        for (const lab of document.querySelectorAll<HTMLElement>(labelSel)) {
-          const g = lab.closest<MozTabGroup>("tab-group");
-          if (g && (g.label || g.getAttribute("label") || "").trim() === want) {
-            target = lab;
+      (groupSel: string, inputSel: string, want: string, typedText: string) => {
+        let input: HTMLInputElement | null = null;
+        for (const g of document.querySelectorAll<MozTabGroup>(groupSel)) {
+          if ((g.label || g.getAttribute("label") || "").trim() === want) {
+            input = g.querySelector<HTMLInputElement>(inputSel);
             break;
           }
         }
-        if (!target) {
+        if (!input) {
           return false;
         }
-        target.focus();
-        target.textContent = typedText;
-        target.dispatchEvent(
+        input.focus();
+        input.value = typedText;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(
           new KeyboardEvent("keydown", {
             key: "Escape",
             bubbles: true,
             cancelable: true,
           }),
         );
-        // Belt and braces: run the commit (blur) listener so edit mode exits.
-        target.dispatchEvent(new FocusEvent("blur"));
         return true;
       },
-      S.groupLabel,
+      "tab-group",
+      S.inlineInput,
       label,
       typed,
     );
+  }
+
+  // ---- Zen's native group edit panel -------------------------------------
+
+  /**
+   * The state of Zen's native group edit panel: "open", "closed", or null when
+   * the panel doesn't exist yet.
+   *
+   * Right-clicking a badge hands off to `gBrowser.tabGroupMenu.openEditModal`,
+   * which opens this real panel. Reading the real `panel.state` (rather than
+   * spying the opener) is what proves the hand-off actually surfaced UI -- the
+   * exact gap that let "tests pass but manual fails" slip through before.
+   */
+  editPanelState(): Promise<string | null> {
+    return this.exec(() => gBrowser.tabGroupMenu?.panel?.state ?? null);
+  }
+
+  /** Whether Zen's native group edit panel is currently open. */
+  async editPanelOpen(): Promise<boolean> {
+    return (await this.editPanelState()) === "open";
+  }
+
+  /** Poll until the native edit panel is open (throws on timeout). */
+  async waitForEditPanel(timeoutMs = 5_000): Promise<void> {
+    await this.driver.wait(
+      async () => await this.editPanelOpen(),
+      timeoutMs,
+      "Zen's native group edit panel did not open",
+      150,
+    );
+  }
+
+  /** Poll until the native edit panel is open, resolving true/false instead of throwing. */
+  async editPanelAppears(timeoutMs = 1_500): Promise<boolean> {
+    try {
+      await this.waitForEditPanel(timeoutMs);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Close the native edit panel if it's open. */
+  async closeEditPanel(): Promise<void> {
+    await this.exec(() => {
+      const menu = gBrowser.tabGroupMenu;
+      if (!menu) {
+        return;
+      }
+      if (typeof menu.close === "function") {
+        menu.close();
+      }
+      menu.panel?.hidePopup();
+    });
+    await this.driver.wait(
+      async () => (await this.editPanelState()) !== "open",
+      5_000,
+      "Zen's native group edit panel did not close",
+      150,
+    );
+  }
+
+  /**
+   * Dispatch a real `contextmenu` on the live inline input for `label`.
+   *
+   * Mid-rename the badge shows our HTML input (the XUL label is hidden), so a
+   * right click lands on the input, not the label. This drives that exact
+   * target to prove the script still hands off to the native panel -- the #3
+   * fix -- without depending on the flaky OS-pointer focus that a real
+   * `contextClick` needs across a long suite.
+   */
+  rightClickInlineInput(label: string): Promise<boolean> {
+    return this.exec(
+      (groupSel: string, inputSel: string, want: string) => {
+        for (const g of document.querySelectorAll<MozTabGroup>(groupSel)) {
+          if ((g.label || g.getAttribute("label") || "").trim() !== want) {
+            continue;
+          }
+          const input = g.querySelector<HTMLInputElement>(inputSel);
+          if (!input) {
+            return false;
+          }
+          input.dispatchEvent(
+            new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+          );
+          return true;
+        }
+        return false;
+      },
+      "tab-group",
+      S.inlineInput,
+      label,
+    );
+  }
+
+  // ---- real (headed-only) pointer + keyboard input -----------------------
+
+  /** Raise/focus the Zen chrome window so real pointer input lands reliably. */
+  private async focusWindow(): Promise<void> {
+    await this.exec(() => window.focus());
+  }
+
+  /**
+   * Real left click on a badge via the WebDriver pointer, then type `newName`
+   * and commit it with a real Enter key.
+   *
+   * This drives the exact path a person takes -- click, type, Enter -- with no
+   * dispatched-event shortcuts, so it can catch real-only regressions (e.g. the
+   * XUL label ignoring focus) that synthetic events would paper over. Headed
+   * only; native input is unreliable headless.
+   */
+  async realRenameInline(label: string, newName: string): Promise<void> {
+    await this.focusWindow();
+    const labelEl = await this.labelElement(label);
+    await labelEl.click();
+    const input = await this.$(S.inlineInput);
+    await input.sendKeys(newName);
+    await input.sendKeys(Key.ENTER);
+  }
+
+  /** Real left click on a badge (no typing). Headed only. */
+  async realClickLabel(label: string): Promise<void> {
+    await this.focusWindow();
+    const labelEl = await this.labelElement(label);
+    await labelEl.click();
+  }
+
+  /** Type into the active inline-rename input, replacing the selected text. */
+  async typeInline(text: string): Promise<void> {
+    const input = await this.$(S.inlineInput);
+    await input.sendKeys(text);
+  }
+
+  /**
+   * Real left click on the tab strip's scrollbox -- a non-focusable XUL
+   * element. Clicking a non-focusable element doesn't blur the HTML input, so
+   * this is the case that only the document `mousedown` handler can dismiss; a
+   * focusable target (a tab, the urlbar) would close via blur and hide the bug.
+   * Headed only.
+   */
+  async realClickAway(): Promise<void> {
+    await this.focusWindow();
+    const strip = await this.$("#tabbrowser-arrowscrollbox");
+    await strip.click();
   }
 
   // ---- modal -------------------------------------------------------------
@@ -924,14 +1280,6 @@ export class ZenDriver {
     );
   }
 
-  /** How many modal panels are currently in the DOM (should be 0 or 1). */
-  modalCount(): Promise<number> {
-    return this.exec(
-      (modalSel: string) => document.querySelectorAll(modalSel).length,
-      S.modal,
-    );
-  }
-
   overlayTitle(): Promise<string | null> {
     return this.exec((titleSel: string) => {
       const t = document.querySelector(titleSel);
@@ -947,47 +1295,6 @@ export class ZenDriver {
       S.modalBody,
       S.input,
     );
-  }
-
-  /** Fill the (first) modal text input. */
-  async fillModalName(text: string): Promise<void> {
-    const sel = `${S.modalBody} ${S.input}`;
-    if (
-      await this.tryNative(async () => {
-        const input = await this.$(sel);
-        await input.clear();
-        await input.sendKeys(text);
-      })
-    ) {
-      return;
-    }
-    await this.exec(
-      (inputSel: string, value: string) => {
-        const el = document.querySelector<HTMLInputElement>(inputSel);
-        if (!el) {
-          return false;
-        }
-        el.focus();
-        el.value = value;
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-        return true;
-      },
-      sel,
-      text,
-    );
-  }
-
-  /** Click the color swatch named `colorName` (its title attribute). */
-  async pickSwatch(colorName: string): Promise<void> {
-    const sel = `${S.swatch}[title="${colorName}"]`;
-    if (await this.tryNative(async () => (await this.$(sel)).click())) {
-      return;
-    }
-    await this.exec((swatchSel: string) => {
-      document.querySelector<HTMLElement>(swatchSel)?.click();
-      return true;
-    }, sel);
   }
 
   /** Click the primary footer button (Save). */

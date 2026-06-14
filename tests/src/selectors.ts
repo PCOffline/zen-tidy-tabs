@@ -13,14 +13,14 @@ export const selectors = {
   modalBody: ".zen-tidy-tabs-modal-body",
   modalFooter: ".zen-tidy-tabs-modal-footer",
 
-  // mk.input / mk.button / ui.colorPicker / ui.segmentedControl
+  // mk.input / mk.button / ui.segmentedControl
   input: ".zen-tidy-tabs-input",
   btnPrimary: ".zen-tidy-tabs-btn.primary",
-  swatch: ".zen-tidy-tabs-swatch",
   segButton: ".zen-tidy-tabs-seg",
 
   // editor.startInline()
   inlineEditingClass: "zen-tidy-tabs-inline-editing",
+  inlineInput: ".zen-tidy-tabs-inline-input",
 
   // native Zen tab groups
   groupLabel: ".tab-group-label",

@@ -8,8 +8,8 @@
     "node": ">=24"
   },
   "scripts": {
-    "test": "playwright test",
-    "test:headless": "cross-env ZEN_HEADLESS=1 playwright test",
+    "test:headful": "playwright test",
+    "test": "cross-env ZEN_HEADLESS=1 playwright test",
     "inspect": "playwright test -c manual.config.ts",
     "report": "playwright show-report",
     "typecheck": "tsc --noEmit",

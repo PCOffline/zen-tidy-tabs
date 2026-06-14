@@ -52,19 +52,6 @@
       styleId: "zen-tidy-tabs-style",
       label: "🧹 Tidy",
       busyLabel: "↻ Tidying…",
-      // Display approximations of the 9 native group colors (Firefox tab groups
-      // only accept these named colors).
-      swatchHex: {
-        blue: "#4983f0",
-        red: "#d8453b",
-        yellow: "#e8c14a",
-        green: "#54b75e",
-        pink: "#e667af",
-        purple: "#8a67e8",
-        cyan: "#3fbcd4",
-        orange: "#e3893c",
-        gray: "#8a8a96",
-      },
     },
 
     grouping: {
@@ -740,17 +727,6 @@
       observer.observe(root, { childList: true, subtree: true });
       Log.groups.debug("Empty-group watcher installed on", dom.describe(root) + ".");
     },
-
-    // Close every tab in a group (and let the now-empty group dissolve).
-    close(groupEl) {
-      const members = [...groupEl.querySelectorAll(TAB_SELECTOR)].filter(tabs.isAlive);
-      Log.groups.debug(`Closing group "${getGroupName(groupEl)}" and its ${members.length} tab(s).`);
-      for (const tab of members) {
-        try { gBrowser.removeTab(tab, { animate: true }); }
-        catch (e) { Log.groups.warn("Failed to close a tab while closing a group.", e); }
-      }
-      groups.scheduleEmptyCheck();
-    },
   };
 
   // ============================================================================
@@ -852,29 +828,9 @@
   };
 
   // ============================================================================
-  // Modal contents — group editor + settings.
+  // Modal contents — settings.
   // ============================================================================
   const ui = {
-    // A swatch grid bound to the 9 native group colors. Returns the grid and a
-    // getter for the current selection.
-    colorPicker(initial) {
-      const grid = make.el("div", "zen-tidy-tabs-swatches");
-      let selected = initial || CONFIG.grouping.colors[0];
-      for (const name of CONFIG.grouping.colors) {
-        const swatch = make.el("button", "zen-tidy-tabs-swatch");
-        swatch.style.setProperty("--swatch", CONFIG.ui.swatchHex[name]);
-        swatch.title = name;
-        if (name === selected) swatch.classList.add("selected");
-        swatch.addEventListener("click", () => {
-          selected = name;
-          grid.querySelectorAll(".zen-tidy-tabs-swatch").forEach((s) => s.classList.remove("selected"));
-          swatch.classList.add("selected");
-        });
-        grid.append(swatch);
-      }
-      return { grid, get: () => selected };
-    },
-
     // A segmented single-choice control. options = [[value, text], ...].
     segmentedControl(options, current) {
       let value = current;
@@ -890,43 +846,6 @@
         segment.append(button);
       }
       return { el: segment, get: () => value };
-    },
-
-    // Edit one group: name + color, with a "Close group" action.
-    editGroup(group) {
-      const { body, footer } = modal.open("Edit group");
-      Log.user.debug(`Opened the edit modal for group "${getGroupName(group)}".`);
-
-      const name = make.input(group.label ?? "", { placeholder: "Group name" });
-      const picker = ui.colorPicker(group.color);
-      body.append(make.field("Name", name), make.field("Color", picker.grid));
-
-      const closeGroup = make.button("Close group", "danger");
-      closeGroup.addEventListener("click", () => {
-        Log.user.info(`Closing group "${getGroupName(group)}" via the edit modal.`);
-        groups.close(group);
-        modal.close();
-      });
-
-      const cancel = make.button("Cancel", "ghost");
-      cancel.addEventListener("click", modal.close);
-
-      const save = make.button("Save changes", "primary");
-      save.addEventListener("click", () => {
-        const newName = name.value.trim();
-        try {
-          if (newName) setGroupName(group, newName);
-          setGroupColor(group, picker.get());
-          Log.user.info(`Group updated: name="${getGroupName(group)}", color="${getGroupColor(group)}".`);
-        } catch (e) {
-          Log.user.error("Failed to apply group edits (rename / recolor).", e);
-        }
-        modal.close();
-      });
-
-      footer.append(closeGroup, make.el("div", "zen-tidy-tabs-spacer"), cancel, save);
-      name.focus();
-      name.select();
     },
 
     // App settings: key, model, label appearance, and what's sent to the AI.
@@ -1089,120 +1008,210 @@
 
   // ============================================================================
   // Group label editing.
-  //   left click  → inline rename
-  //   right click → full edit modal (rename + recolor)
+  //   left click  → inline rename (an <input> overlaid on the badge)
+  //   right click → Zen's native group edit panel (rename + recolor)
   // Each gesture maps to exactly one action, so rapid or mixed clicks can never
-  // leave the badge in an inconsistent state.
+  // leave the badge in an inconsistent state. The label itself is a XUL element,
+  // which ignores `contenteditable`, so inline editing swaps in a real HTML
+  // <input> rather than trying to make the label editable in place.
   // ============================================================================
+  const HTML_NS = "http://www.w3.org/1999/xhtml";
+
   const editor = {
-    active: null, // { labelEl, group, original, cleanup }
+    active: null, // { input, labelEl, group, original, discard, cleanup }
 
     install() {
-      if (win.__zenTidyTabsEditorInstalled) return;
-      win.__zenTidyTabsEditorInstalled = true;
+      // Re-evaluating the script reuses the same window, so drop the previous
+      // load's listeners (refs survive on `win`) before binding this load's.
+      const prev = win.__zenTidyTabsEditorListeners;
+      if (prev) {
+        doc.removeEventListener("click", prev.onClick, true);
+        doc.removeEventListener("contextmenu", prev.onContextMenu, true);
+      }
+      editor.cancelInline();
 
-      // Left click → inline rename.
-      doc.addEventListener("click", (e) => {
+      const onClick = (e) => {
+        // XUL fires `click` for the right button too (unlike HTML); without this
+        // a right click would also start an inline rename.
+        if (e.button !== 0) return;
+        // A click on our own inline input must not reach Zen's tab-group handler,
+        // which collapses the group. The second click of a double-click lands
+        // here because the badge is hidden behind the input.
+        if (e.target?.closest?.(".zen-tidy-tabs-inline-input")) {
+          e.stopPropagation();
+          return;
+        }
         const labelEl = e.target?.closest?.(".tab-group-label");
         if (!labelEl) return;
         const group = labelEl.closest("tab-group");
         if (!group) return;
 
-        // Already editing this label? Let the click position the caret.
-        if (editor.active?.labelEl === labelEl) return;
-
-        // We own this interaction: block Zen's native click (collapse / its own
-        // inline edit).
         e.preventDefault();
         e.stopPropagation();
-
-        // Don't start an inline edit underneath the edit modal.
-        if (doc.getElementById("zen-tidy-tabs-overlay")) return;
 
         editor.startInline(group, labelEl);
-      }, true); // capture, so we act before the label's own handler
+      };
 
-      // Right click → full edit modal.
-      doc.addEventListener("contextmenu", (e) => {
-        const labelEl = e.target?.closest?.(".tab-group-label");
-        if (!labelEl) return;
-        const group = labelEl.closest("tab-group");
+      const onContextMenu = (e) => {
+        // Match the inline input too, so a right click mid-rename still opens the
+        // panel rather than landing on the (hidden) label.
+        const hit = e.target?.closest?.(".tab-group-label, .zen-tidy-tabs-inline-input");
+        if (!hit) return;
+        const group = hit.closest("tab-group");
         if (!group) return;
 
-        // Suppress Zen's native context menu; we open our editor instead.
         e.preventDefault();
         e.stopPropagation();
 
-        // Abandon any in-progress inline edit before switching to the modal,
-        // and never stack a second modal on top of an open one.
         editor.cancelInline();
-        if (!doc.getElementById("zen-tidy-tabs-overlay")) ui.editGroup(group);
-      }, true); // capture, so we act before the label's own handler
+        // Defer past this gesture: opening the XUL popup synchronously lets the
+        // gesture's trailing mouseup roll it straight back up.
+        win.setTimeout(() => {
+          try {
+            gBrowser.tabGroupMenu?.openEditModal(group);
+          } catch (err) {
+            Log.user.error("Failed to open Zen's native group edit panel.", err);
+          }
+        }, 0);
+      };
 
-      Log.user.debug("Group label editor installed (left click renames inline, right click opens the edit modal).");
+      // Capture, so we act before the label's own handlers.
+      doc.addEventListener("click", onClick, true);
+      doc.addEventListener("contextmenu", onContextMenu, true);
+      win.__zenTidyTabsEditorListeners = { onClick, onContextMenu };
+
+      Log.user.debug("Group label editor installed.");
     },
 
     startInline(group, labelEl) {
+      // One editor at a time; re-focus if the same label is already live.
+      if (editor.active?.labelEl === labelEl) {
+        editor.active.input.focus();
+        return;
+      }
       editor.cancelInline();
-      const original = (group.label ?? labelEl.textContent ?? "").trim();
-      labelEl.setAttribute("contenteditable", "true");
-      labelEl.classList.add("zen-tidy-tabs-inline-editing");
-      labelEl.focus();
-      try {
-        const range = doc.createRange();
-        range.selectNodeContents(labelEl);
-        const selection = win.getSelection();
-        selection.removeAllRanges();
-        selection.addRange(range);
-      } catch { /* selection not critical */ }
 
-      const commit = () => {
-        const name = (labelEl.textContent || "").trim();
+      const original = getGroupName(group);
+
+      // A real HTML input — contenteditable is a no-op on the XUL label.
+      const input = doc.createElementNS(HTML_NS, "input");
+      input.className = "zen-tidy-tabs-inline-input";
+      input.value = original;
+      input.setAttribute("aria-label", "Rename group");
+
+      // Copy the badge's own look (color, background, font, padding, shape) onto
+      // the input so the rename feels in-place rather than like a form field.
+      // Read while the label is still rendered, then hand its spot to the input.
+      const cs = win.getComputedStyle(labelEl);
+      const inherited = [
+        "fontFamily", "fontSize", "fontWeight", "fontStyle", "letterSpacing",
+        "lineHeight", "color", "backgroundColor", "backgroundImage",
+        "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+        "borderRadius", "height", "textAlign", "textShadow",
+      ];
+      for (const prop of inherited) input.style[prop] = cs[prop];
+      // Size to the text, not the badge's slot: the label can be stretched by
+      // its flex parent, so letting the input fill (or copying the label's
+      // width) balloons it to the full sidebar. Measure the text with a hidden
+      // span in the same font and pin the input's content-box width to it, so
+      // the field hugs its text and grows as you type.
+      const measure = doc.createElementNS(HTML_NS, "span");
+      measure.style.position = "absolute";
+      measure.style.visibility = "hidden";
+      measure.style.whiteSpace = "pre";
+      measure.style.pointerEvents = "none";
+      for (const prop of ["fontFamily", "fontSize", "fontWeight", "fontStyle", "letterSpacing"]) {
+        measure.style[prop] = cs[prop];
+      }
+      const sizeToText = () => {
+        measure.textContent = input.value || "";
+        const w = Math.ceil(measure.getBoundingClientRect().width) + 2;
+        input.style.width = `${Math.max(w, 8)}px`;
+      };
+      input.style.boxSizing = "content-box";
+      input.style.flex = "0 0 auto";
+
+      // Hide the native label and drop the input (and its measuring span) in.
+      labelEl.classList.add("zen-tidy-tabs-inline-editing");
+      // Zen's empty sidebar is `-moz-window-dragging: drag`, so the window
+      // manager eats a mouse press there before the DOM sees it; this marker
+      // drives a CSS rule that disables that while editing, so the click-away
+      // handler still fires. (BADGE-7)
+      doc.documentElement.classList.add("zen-tidy-tabs-editing");
+      labelEl.style.display = "none";
+      labelEl.parentNode.insertBefore(input, labelEl);
+      input.parentNode.insertBefore(measure, input);
+      sizeToText();
+
+      let settled = false;
+      const finish = (commit) => {
+        if (settled) return;
+        settled = true;
+        const name = input.value.trim();
         editor.finishInline();
-        if (name && name !== original) {
+        if (commit && name && name !== original) {
           try {
             setGroupName(group, name);
             Log.user.info(`Renamed group "${original}" to "${name}".`);
           } catch (e) {
-            Log.user.error(`Failed to rename group "${original}" to "${name}"; restoring the previous name.`, e);
-            labelEl.textContent = original;
+            Log.user.error(`Failed to rename group "${original}" to "${name}".`, e);
           }
-        } else {
-          labelEl.textContent = original;
         }
       };
 
       const onKey = (e) => {
-        if (e.key === "Enter") { e.preventDefault(); labelEl.blur(); }
-        else if (e.key === "Escape") { e.preventDefault(); labelEl.textContent = original; labelEl.blur(); }
+        if (e.key === "Enter") { e.preventDefault(); finish(true); }
+        else if (e.key === "Escape") { e.preventDefault(); finish(false); }
         e.stopPropagation();
       };
+      const onBlur = () => finish(true);
+      // A non-focusable XUL target (a tab, the toolbar) doesn't blur the input,
+      // so commit on any mouse press outside it. mousedown, not pointerdown:
+      // chrome XUL doesn't deliver pointer events here.
+      const onDocDown = (e) => {
+        if (e.target === input || input.contains(e.target)) return;
+        finish(true);
+      };
 
-      labelEl.addEventListener("keydown", onKey, true);
-      labelEl.addEventListener("blur", commit, { once: true });
+      input.addEventListener("input", sizeToText);
+      input.addEventListener("keydown", onKey, true);
+      input.addEventListener("blur", onBlur);
+      doc.addEventListener("mousedown", onDocDown, true);
+
       editor.active = {
+        input,
         labelEl,
         group,
         original,
-        cleanup: () => labelEl.removeEventListener("keydown", onKey, true),
+        discard: () => finish(false),
+        cleanup: () => {
+          measure.remove();
+          input.removeEventListener("input", sizeToText);
+          input.removeEventListener("keydown", onKey, true);
+          input.removeEventListener("blur", onBlur);
+          doc.removeEventListener("mousedown", onDocDown, true);
+        },
       };
+
+      input.focus();
+      input.select();
     },
 
+    // Tear down the editor's DOM, restoring the native label.
     finishInline() {
       const state = editor.active;
       if (!state) return;
       editor.active = null;
       state.cleanup?.();
-      state.labelEl.removeAttribute("contenteditable");
+      state.input.remove();
+      doc.documentElement.classList.remove("zen-tidy-tabs-editing");
+      state.labelEl.style.removeProperty("display");
       state.labelEl.classList.remove("zen-tidy-tabs-inline-editing");
     },
 
-    // Abandon an in-progress inline edit, restoring the original name.
+    // Abandon an in-progress inline edit without renaming.
     cancelInline() {
-      const state = editor.active;
-      if (!state) return;
-      state.labelEl.textContent = state.original;
-      editor.finishInline();
+      editor.active?.discard?.();
     },
   };
 
@@ -1322,20 +1331,6 @@
           border-color: ${t.accent};
         }
 
-        /* ---- Color swatches (the 9 native group colors) ---- */
-        .zen-tidy-tabs-swatches { display: flex; flex-wrap: wrap; gap: 10px; padding: 2px 0; }
-        .zen-tidy-tabs-swatch {
-          all: unset; cursor: pointer;
-          width: 26px; height: 26px; border-radius: 50%;
-          background: var(--swatch);
-          box-shadow: 0 0 0 2px transparent, 0 1px 3px rgba(0,0,0,.3);
-          transition: box-shadow .12s ease, transform .12s ease;
-        }
-        .zen-tidy-tabs-swatch:hover { transform: scale(1.08); }
-        .zen-tidy-tabs-swatch.selected {
-          box-shadow: 0 0 0 2px ${t.bg}, 0 0 0 4px var(--swatch);
-        }
-
         /* ---- Segmented control ---- */
         .zen-tidy-tabs-segment {
           display: inline-flex; flex-wrap: wrap; padding: 3px; gap: 3px;
@@ -1364,13 +1359,23 @@
         .zen-tidy-tabs-btn.danger:hover { background: rgba(226,109,109,.14); filter: none; }
 
         /* ---- Inline group rename ---- */
-        .tab-group-label.zen-tidy-tabs-inline-editing {
-          outline: 1px solid ${t.accent} !important;
-          outline-offset: 1px;
-          border-radius: 5px;
+        /* startInline() copies the badge's own font, color, background, padding
+           and shape onto the input so the rename happens in place. Keep this
+           rule minimal so it can't fight those copied inline styles. */
+        .zen-tidy-tabs-inline-input {
+          all: unset;
+          box-sizing: border-box;
+          min-width: 0; max-width: 100%;
+          font: inherit;
           cursor: text;
-          -moz-user-select: text;
-          user-select: text;
+          caret-color: ${t.accent};
+        }
+
+        /* BADGE-7: while renaming, stop Zen's empty sidebar (a window-drag
+           region) from swallowing the mouse press, so a single click there
+           still ends the inline edit instead of dragging the window. */
+        :root.zen-tidy-tabs-editing .zen-workspace-empty-space {
+          -moz-window-dragging: no-drag;
         }
 
         ${styles.labelStyleCss()}

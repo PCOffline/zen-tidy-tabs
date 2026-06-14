@@ -24,8 +24,8 @@ native sidebar. Organise your tabs by categories in the press of a button.
 - **Smart re-tidy** — running it again reconsiders the *whole* workspace (already
   grouped tabs included), so new tabs join existing categories or the layout is
   reorganized. Emptied groups dissolve automatically.
-- **Rename & recolor** — double-click a group label to rename and recolor it;
-  single-click renames it inline.
+- **Rename & recolor** — left-click a group label to rename it inline; right-click
+  it for more group options like renaming and recoloring.
 - **Privacy-aware** — query strings are never sent to the model, and you choose how
   much of each tab is shared (title only, title + domain, or title + URL).
 
@@ -53,10 +53,11 @@ Once loaded, the "🧹 Tidy" control appears next to Zen's Clear button.
 ## Usage
 
 - **Tidy:** click the "🧹 Tidy" control. Tabs in the active workspace are clustered
-  into native groups. (At least 2 tabs are required.)
+  into native groups. (At least 3 tabs are required.)
 - **Settings:** right-click the "🧹 Tidy" control to open the settings modal, where
   you can set your API key, model, and other options.
-- **Rename / recolor a group:** double-click its label.
+- **Rename a group:** left-click its label to rename it inline, or right-click it
+  for more group options (rename, recolor, and more).
 
 ## Configuration
 

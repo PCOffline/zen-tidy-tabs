@@ -36,6 +36,13 @@ declare global {
     removeTab(tab: MozTab, opts?: { animate?: boolean }): void;
     addTabGroup(tabs: MozTab[], opts?: AddTabGroupOptions): MozTabGroup | null;
     removeTabGroup(group: MozTabGroup): void;
+    /** Zen's native group edit panel (rename + recolor). `panel.state` is
+     *  "open"/"closed"; `close()` dismisses it. */
+    tabGroupMenu?: {
+      openEditModal(group: MozTabGroup): void;
+      panel?: { state: string; hidePopup(): void };
+      close?(): void;
+    };
   }
 
   const gBrowser: GBrowser;
