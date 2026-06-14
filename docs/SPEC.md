@@ -214,8 +214,7 @@ in-place HTML input the script swaps in for the badge.
 
 - **SETTINGS-2** — The modal exposes these controls:
   - **OpenRouter API key** — password input.
-  - **Model** — text input with a datalist of suggested model slugs; placeholder is the
-    default model (`openai/gpt-4o-mini`).
+  - **Model** — text input; placeholder is the default model (`openai/gpt-4o-mini`).
   - **Group labels** — segmented control: `Colored` (= `filled`) / `Text only` (= `text`).
   - **Tab info sent to AI** — segmented control: `Detailed` / `Compact` / `Minimal`.
   - Hint text explaining the privacy modes, and a link to `openrouter.ai/keys`.

@@ -40,12 +40,6 @@
       outputPreviewMaxChars: 200,      // truncate unparseable model output in logs
       referer: "https://github.com/PCOffline/zen-tidy-tabs", // OpenRouter attribution
       title: "Zen Tidy Tabs",
-      suggestedModels: [
-        "openai/gpt-4o-mini",
-        "openai/gpt-4.1-mini",
-        "google/gemini-flash-1.5",
-        "anthropic/claude-3.5-haiku",
-      ],
     },
 
     ui: {
@@ -869,17 +863,6 @@
       const key = make.input(prefs.apiKey(), { type: "password", placeholder: "sk-or-v1-..." });
       const model = make.input(prefs.model(), { placeholder: CONFIG.api.defaultModel });
 
-      // Model suggestions via a datalist.
-      const modelListId = "zen-tidy-tabs-model-list";
-      const datalist = make.el("datalist");
-      datalist.id = modelListId;
-      for (const slug of CONFIG.api.suggestedModels) {
-        const option = make.el("option");
-        option.value = slug;
-        datalist.append(option);
-      }
-      model.setAttribute("list", modelListId);
-
       const labelSegment = ui.segmentedControl(
         [["filled", "Colored"], ["text", "Text only"]],
         prefs.labelStyle()
@@ -903,7 +886,6 @@
       body.append(
         make.field("OpenRouter API key", key),
         make.field("Model", model),
-        datalist,
         make.field("Group labels", labelSegment.el),
         make.field("Tab info sent to AI", urlSegment.el),
         urlHint,
