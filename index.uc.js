@@ -5,6 +5,7 @@
 //                 LLM (OpenRouter) into native Zen tab groups. Right-click a
 //                 group label to rename / recolor it; left-click renames inline.
 // @author         PCOffline
+// @version        0.4.0
 // @include        main
 // ==/UserScript==
 

@@ -1,0 +1,14 @@
+{
+  "name": "Zen Tidy Tabs",
+  "description": "Arc-style AI tab tidying in Zen's native sidebar.",
+  "author": "PCOffline",
+  "homepage": "https://github.com/PCOffline/zen-tidy-tabs",
+  "version": "0.4.0",
+  "scripts": {
+    "index.uc.js": {
+      "include": [
+        "*browser.xhtml*"
+      ]
+    }
+  }
+}
