@@ -1,0 +1,262 @@
+# Zen Tidy Tabs — Behaviour Specification
+
+This document is the **single source of truth** for what Zen Tidy Tabs does. Every
+behaviour the product guarantees is listed here with a stable ID. The end-to-end
+tests under `tests/specs/` exist to verify these clauses and nothing else.
+
+> [!IMPORTANT]
+> **Change protocol.** A behaviour does not exist until it is written here, and a
+> test must not assert anything that is not written here. Any change to behaviour
+> flows **SPEC → tests → code**, in that order, in the same change. See
+> [`.agents/skills/spec-sync/SKILL.md`](./.agents/skills/spec-sync/SKILL.md).
+
+Each clause carries:
+
+- a **stable ID** (e.g. `BADGE-2`) that tests reference in their title or a comment;
+- a **Verified by** line naming the test(s) that prove it, or `Unverified` if no
+  automated test covers it yet (these are gaps, not permission to skip the SPEC).
+
+Terminology follows the codebase: the **Tidy control** is the "🧹 Tidy" button; a
+**group badge** (or label) is a native Zen `tab-group` label; **inline edit** is the
+in-place HTML input the script swaps in for the badge.
+
+---
+
+## 1. Tidy control (the "🧹 Tidy" button)
+
+- **CONTROL-1** — A control with id `zen-tidy-tabs-button`, text/label `🧹 Tidy`, and
+  tooltip `Tidy tabs with AI` is mounted in Zen's sidebar.
+  _Verified by: `tidy-button.spec.ts › the tidy button exists`._
+
+- **CONTROL-2** — Placement. When Zen's native **Clear** control is present, the Tidy
+  control is a *twin*: same element type and classes as Clear, in Clear's parent,
+  positioned immediately before Clear (so it inherits Clear's hover-reveal look). When
+  no Clear control is present, it falls back to the active workspace tab section,
+  inserted before the first normal (non-pinned, non-essential) node. The mount
+  self-heals: a watcher upgrades the fallback to a twin if Clear later appears.
+  _Verified by: `tidy-button.spec.ts › the tidy button's placement is correct`._
+
+- **CONTROL-3** — **Left-click** (or a XUL `command` event) on the Tidy control starts a
+  tidy run (see §2). The native action is suppressed (`preventDefault` + `stopPropagation`).
+  _Verified by: `tidying.spec.ts › tidying the tabs actually works` (clicks the real control)._
+
+- **CONTROL-4** — While a run is in progress the control shows `↻ Tidying…` and is
+  non-interactive (`pointer-events: none`); both revert when the run ends.
+  _Unverified._
+
+- **CONTROL-5** — **Right-click** on the Tidy control opens the Settings modal (§5) and
+  suppresses the native context menu.
+  _Verified by: `settings.spec.ts › right-clicking the button opens the Zen Tidy Tabs configuration`._
+
+---
+
+## 2. Tidy operation
+
+- **TIDY-1** — A run requires a configured OpenRouter API key. With no key, the run
+  aborts before any tab collection and surfaces a notification telling the user to set
+  the key. _Unverified._
+
+- **TIDY-2** — The run is re-entrant-safe: while one run is in progress, further
+  activations are ignored. _Unverified._
+
+- **TIDY-3** — Eligible tabs are collected from the **active workspace only**, and a
+  re-tidy reconsiders the *whole* workspace, **including already-grouped tabs**. A tab is
+  eligible iff it is not pinned, hidden, or closing, is not a Zen empty/glance tab, and
+  belongs to the active workspace.
+  _Verified by: `tidying.spec.ts › re-tidying never paints the old groups beneath the new ones`
+  (re-tidies already-grouped tabs)._
+
+- **TIDY-4** — **Minimum of 3 eligible tabs.** With fewer than 3, the run aborts *before*
+  contacting the model (no network call, no group creation) and notifies the user.
+  _Verified by: `min-tabs.spec.ts › refuses to tidy below the minimum and never calls the model`._
+
+- **TIDY-5** — The model receives a compact snapshot, one entry per eligible tab:
+  `{ i, title, url?, group? }`.
+  - `title` is always sent (truncated to a max length).
+  - `url` is included per the privacy preference (§6 `urlmode`): `detailed` = host + path,
+    `compact` = hostname only, `minimal` = omitted. **Query strings and hashes are never
+    sent.**
+  - `group` is included **only** for tabs that are already in a group, and carries that
+    group's current name as a *hint* for keeping existing groupings stable (§2 TIDY-7).
+  _Unverified (snapshot shape)._
+
+- **TIDY-6** — The prompt caps the number of groups at `clamp(ceil(tabCount / 3), 2, 8)`
+  and instructs the model to group by what the user is *doing*, name groups in 1–3 words
+  Title Case, avoid catch-all names (`Misc`/`Other`/`General`/…), and ground every group
+  in the supplied titles/URLs. _Unverified._
+
+- **TIDY-7** — **Stability of existing groups.** When existing groups are present, the
+  prompt instructs the model to keep a sensible existing group, reuse its *exact* name,
+  and only reorganise with a clear reason (e.g. new tabs make a broader category
+  correct). On the apply side, a planned group whose normalised name matches an existing
+  group is **kept in place** — its position and colour are preserved and only the tabs
+  that actually changed are moved in. Genuinely new groups are created; existing groups
+  the plan abandons are dissolved.
+  _Verified by: `tidying.spec.ts › re-tidying never paints the old groups beneath the new ones`._
+
+  > Note: position/colour are preserved only when the planned name matches an existing
+  > group's name (case/space-insensitive). If the model renames a group, that group is
+  > treated as new and may be repositioned. See Open Question OQ-4.
+
+- **TIDY-8** — Plan parsing maps `{ groups: [{ name, tabs: [<index>] }] }` back to real
+  tabs. Each tab index is used at most once. Any eligible tab the model omits is collected
+  into a trailing **`Misc`** group so no tab is lost.
+  _Verified by: `tidying.spec.ts › tidying the tabs actually works`._
+
+- **TIDY-9** — Applying a plan **never nests** one group inside another, and **never shows
+  the old groups stacked beneath the new ones** during a re-tidy (no husk flicker):
+  emptied pre-existing groups are removed synchronously as the new layout is built.
+  _Verified by: `tidying.spec.ts › re-tidying never paints the old groups beneath the new ones`._
+
+- **TIDY-10** — On success the run notifies how many tabs were sorted into how many
+  groups; on failure it notifies the failure. _Unverified._
+
+---
+
+## 3. Group badge — inline rename (left-click)
+
+- **BADGE-1** — A **single left-click** on a group badge enters **inline edit**: the native
+  XUL label is hidden and replaced in place by an HTML input
+  (`.zen-tidy-tabs-inline-input`), and the badge gains the marker class
+  `zen-tidy-tabs-inline-editing`. Zen's native click action (collapse/expand) is
+  suppressed. A left-click **never** opens the native panel.
+  _Verified by: `group-badge.spec.ts › left-clicking the group badge renames it inline`._
+
+- **BADGE-2** — **Minimal visual impact.** The input copies the badge's computed font,
+  colour, background, padding, border-radius, height, text-align, and text-shadow, so the
+  field reads as the badge itself rather than a form control. It is sized to its text
+  (content-box) and grows as you type, and never balloons to the sidebar width or
+  overflows the tab strip.
+  _Verified by: `group-badge.spec.ts › the inline input hugs its text and grows as you type`
+  (headed only)._
+
+- **BADGE-3** — **Enter saves.** Pressing Enter commits the rename. The new name is
+  trimmed; the rename is applied only when it is non-empty and differs from the original.
+  _Verified by: `group-badge.spec.ts › left-clicking the group badge renames it inline`._
+
+- **BADGE-4** — **Escape cancels.** Pressing Escape abandons the edit and restores the
+  original name; nothing typed is saved.
+  _Verified by: `group-badge.spec.ts › pressing Escape during inline rename keeps the original name`._
+
+- **BADGE-5** — **Click-away / blur commits the edit.** Pressing the mouse anywhere outside
+  the input, or the input losing focus, ends the inline edit and **saves** the current
+  value (same trim/non-empty/changed rule as Enter). A single click away is enough to
+  leave edit mode.
+  _Verified by: `group-badge.spec.ts › a single real click away saves the inline edit` (headed
+  only)._
+
+- **BADGE-6** — **One editor at a time, no stuck edits.** Only one inline editor is ever
+  active; re-clicking the same badge refocuses it. Rapid, repeated, double, or alternating
+  left-clicks keep the badge inline and usable and never strand a half-open edit.
+  _Verified by: `group-badge.spec.ts › spam left-clicks…`, `› double left-click stays inline…`,
+  `› erratic alternating clicks never leave a stuck inline edit`._
+
+- **BADGE-7** — **Click-away works over window-drag regions.** Zen's empty sidebar area
+  (`.zen-workspace-empty-space`) is a `-moz-window-dragging: drag` region, so a real mouse
+  press there is taken by the window manager for window-dragging and never reaches the DOM
+  — which would leave an inline edit stuck open (BADGE-5's dismissal handler never fires).
+  While an inline edit is active the script marks the chrome root
+  (`:root.zen-tidy-tabs-editing`) and forces such regions to `-moz-window-dragging: no-drag`,
+  so a single click on the empty sidebar still ends the edit. The override is removed when
+  the edit ends.
+  _Verified by: `group-badge.spec.ts › inline edit disables window-dragging on the empty sidebar`._
+
+- **BADGE-8** — **Editing never collapses the group.** Zen collapses/expands a group when
+  its badge is clicked. During an inline edit the badge is hidden behind the input, so the
+  second click of a double-click lands on the input; the script swallows clicks on the
+  inline input so they never reach Zen's collapse handler. Double-clicking a badge therefore
+  never collapses the group or leaves it stuck in the collapsed (selected-looking) style.
+  _Verified by: `group-badge.spec.ts › clicking the inline input never collapses the group`._
+
+---
+
+## 4. Group badge — native edit panel (right-click)
+
+- **PANEL-1** — A **single right-click** on a group badge opens **Zen's native group edit
+  panel** (`gBrowser.tabGroupMenu.openEditModal`) exactly once. The native context menu is
+  suppressed. The panel is Zen's own UI for renaming, recolouring, and closing the group.
+  _Verified by: `group-badge.spec.ts › right-clicking the group badge opens Zen's native edit panel`._
+
+- **PANEL-2** — Right-click works whether the badge is showing its label or the inline
+  input. If an inline edit is in progress, the right-click **cancels** that inline edit and
+  hands off to the native panel.
+  _Verified by: `group-badge.spec.ts › right-clicking mid-rename opens the native panel and ends the inline edit`._
+
+---
+
+## 5. Settings modal (right-click the Tidy control)
+
+- **SETTINGS-1** — Right-clicking the Tidy control opens a custom modal titled
+  **"Zen Tidy Tabs Settings"** (overlay id `zen-tidy-tabs-overlay`).
+  _Verified by: `settings.spec.ts › right-clicking the button opens the Zen Tidy Tabs configuration`._
+
+- **SETTINGS-2** — The modal exposes these controls:
+  - **OpenRouter API key** — password input.
+  - **Model** — text input with a datalist of suggested model slugs; placeholder is the
+    default model (`openai/gpt-4o-mini`).
+  - **Group labels** — segmented control: `Colored` (= `filled`) / `Text only` (= `text`).
+  - **Tab info sent to AI** — segmented control: `Detailed` / `Compact` / `Minimal`.
+  - Hint text explaining the privacy modes, and a link to `openrouter.ai/keys`.
+  _Verified by: `settings.spec.ts › right-clicking the button opens the Zen Tidy Tabs configuration`
+  (API key field) and `› saved settings persist…` (model + both segmented controls)._
+
+- **SETTINGS-3** — **Save** persists every field to `about:config` prefs (§6), re-applies
+  the label appearance immediately, closes the modal, and notifies. **Cancel**, the ✕
+  button, Escape, and clicking outside the panel all close it without saving. Focus is
+  trapped inside the modal while open.
+  _Verified by: `settings.spec.ts › saved settings persist and are reflected when reopened`
+  (save + persistence); close-without-save paths Unverified._
+
+- **SETTINGS-4** — Reopening the modal reflects the currently-saved values.
+  _Verified by: `settings.spec.ts › saved settings persist and are reflected when reopened`._
+
+---
+
+## 6. Preferences (about:config)
+
+All settings live under `about:config` and are editable both there and via the modal.
+
+| Pref | Values | Default | Clause |
+|---|---|---|---|
+| `zen-tidy-tabs.apikey` | OpenRouter key string | empty | TIDY-1, SETTINGS-2 |
+| `zen-tidy-tabs.model` | model slug | `openai/gpt-4o-mini` | TIDY-5, SETTINGS-2 |
+| `zen-tidy-tabs.labelstyle` | `filled` \| `text` | `filled` | LABEL-1 |
+| `zen-tidy-tabs.urlmode` | `detailed` \| `compact` \| `minimal` | `detailed` | TIDY-5 |
+
+- **PREFS-1** — An unrecognised `urlmode` value falls back to `detailed`.
+  _Unverified._
+
+_Verified by: `settings.spec.ts › saved settings persist and are reflected when reopened`
+(all four prefs round-trip)._
+
+---
+
+## 7. Group appearance
+
+- **LABEL-1** — With `labelstyle = text`, group badges render in an Arc-style text-only
+  form (transparent background, neutral weight). With `labelstyle = filled` (default),
+  badges keep Zen's native coloured style. Changing the setting re-applies immediately.
+  _Unverified._
+
+---
+
+## 8. Group lifecycle
+
+- **LIFECYCLE-1** — A group whose tabs all close (or are all dragged out) is **dissolved
+  automatically**. A scheduled sweep runs after a tidy and after closing a group, and a
+  mutation watcher catches drag-driven emptying. A group is **not** dissolved while the
+  user is mid inline-rename on it.
+  _Verified by: `empty-group.spec.ts › a group whose tabs all close is dissolved automatically`._
+
+---
+
+## Open questions / known divergences
+
+These are unresolved contradictions between this SPEC, the shipped code, and other docs.
+Each must be closed by editing the SPEC (and then tests + code) or by fixing the code —
+never left silently divergent.
+
+- **OQ-4 — Rename breaks position stability.** Per TIDY-7, an existing group keeps its
+  position/colour only when the planned name matches its current name. If the model renames
+  an otherwise-stable group, it is rebuilt and may move. Decide whether this is acceptable
+  or whether reconciliation should match groups by membership as well as name.
