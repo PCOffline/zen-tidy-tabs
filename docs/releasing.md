@@ -15,7 +15,15 @@ npm install
 ```
 
 Creating the GitHub Release needs a token with `repo` (or fine-grained
-`contents: write`) scope, exposed as `GITHUB_TOKEN`:
+`contents: write`) scope, exposed as `GITHUB_TOKEN`. Save it once in a
+gitignored `.env` file at the repo root and the release scripts pick it up
+automatically (via Node's `--env-file-if-exists`):
+
+```sh
+echo "GITHUB_TOKEN=ghp_..." >> .env
+```
+
+Alternatively, export it in your shell instead of using `.env`:
 
 ```sh
 export GITHUB_TOKEN=ghp_...      # PowerShell: $env:GITHUB_TOKEN = "ghp_..."

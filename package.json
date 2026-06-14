@@ -22,8 +22,8 @@
     "typecheck": "cd tests && tsc --noEmit",
     "lint": "cd tests && biome check .",
     "format": "cd tests && biome format --write .",
-    "release": "release-it",
-    "release:dry": "release-it --dry-run"
+    "release": "node --env-file-if-exists=.env node_modules/release-it/bin/release-it.js",
+    "release:dry": "node --env-file-if-exists=.env node_modules/release-it/bin/release-it.js --dry-run"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",
