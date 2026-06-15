@@ -1811,6 +1811,106 @@ export class ZenDriver {
     );
   }
 
+  /**
+   * Replace fetch with one whose reply is cut off by the output token limit:
+   * `finish_reason: "length"` with partial, unparseable JSON content. The run
+   * must fail with a truncation-specific message (TIDY-17).
+   */
+  async installFetchTruncatedStub(): Promise<void> {
+    const payload = JSON.stringify({
+      id: "zen-tidy-tabs-stub",
+      model: "zen-tidy-tabs-stub",
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: '{"groups":[{"name":"Partial","tabs":[0,1',
+          },
+          finish_reason: "length",
+        },
+      ],
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    });
+    await this.exec((body: string) => {
+      if (!window.__zenTidyTabsOrigFetch) {
+        window.__zenTidyTabsOrigFetch = window.fetch;
+      }
+      window.__zenTidyTabsFetchCalls = 0;
+      window.__zenTidyTabsLastBody = null;
+      window.fetch = (_url: unknown, init?: { body?: unknown }) => {
+        window.__zenTidyTabsFetchCalls =
+          (window.__zenTidyTabsFetchCalls ?? 0) + 1;
+        window.__zenTidyTabsLastBody =
+          init?.body == null ? null : String(init.body);
+        return Promise.resolve(
+          new Response(body, {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      };
+      return true;
+    }, payload);
+  }
+
+  /**
+   * Replace fetch with one that rejects the first request with HTTP 400 (as a
+   * provider that does not support `response_format: json_schema` would), then
+   * succeeds on every subsequent request with `grouping`. Exercises the
+   * `json_schema → json_object → none` degradation (TIDY-16).
+   */
+  async installFetchRejectThenSucceedStub(
+    grouping: GroupingPlan,
+    rejectBody = "response_format.json_schema is not supported by this model",
+  ): Promise<void> {
+    const content = JSON.stringify(grouping);
+    const success = JSON.stringify({
+      id: "zen-tidy-tabs-stub",
+      model: "zen-tidy-tabs-stub",
+      choices: [
+        {
+          index: 0,
+          message: { role: "assistant", content },
+          finish_reason: "stop",
+        },
+      ],
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    });
+    await this.exec(
+      (okBody: string, errBody: string) => {
+        if (!window.__zenTidyTabsOrigFetch) {
+          window.__zenTidyTabsOrigFetch = window.fetch;
+        }
+        window.__zenTidyTabsFetchCalls = 0;
+        window.__zenTidyTabsLastBody = null;
+        window.fetch = (_url: unknown, init?: { body?: unknown }) => {
+          const n = (window.__zenTidyTabsFetchCalls ?? 0) + 1;
+          window.__zenTidyTabsFetchCalls = n;
+          window.__zenTidyTabsLastBody =
+            init?.body == null ? null : String(init.body);
+          if (n === 1) {
+            return Promise.resolve(
+              new Response(errBody, {
+                status: 400,
+                headers: { "Content-Type": "text/plain" },
+              }),
+            );
+          }
+          return Promise.resolve(
+            new Response(okBody, {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        };
+        return true;
+      },
+      success,
+      rejectBody,
+    );
+  }
+
   /** Release a deferred fetch stub installed with `{ defer: true }`. */
   async releaseFetch(): Promise<void> {
     await this.exec(() => {
@@ -1833,11 +1933,31 @@ export class ZenDriver {
     const parsed = JSON.parse(body) as {
       messages?: { role: string; content: string }[];
     };
-    const user = parsed.messages?.find((m) => m.role === "user");
-    if (!user) {
-      throw new Error("captured request had no user message");
+    const messages = parsed.messages ?? [];
+    if (messages.length === 0) {
+      throw new Error("captured request had no messages");
     }
-    return user.content;
+    // The instructions live in the system message and the snapshot in the user
+    // message (TIDY-18); join them so prompt/snapshot assertions see both.
+    return messages.map((m) => m.content).join("\n");
+  }
+
+  /** Parsed JSON of the most recent stubbed request body (TIDY-15, TIDY-16, TIDY-18). */
+  async lastRequestJson(): Promise<{
+    messages?: { role: string; content: string }[];
+    temperature?: number;
+    seed?: number;
+    max_tokens?: number;
+    response_format?: {
+      type?: string;
+      json_schema?: { name?: string; strict?: boolean; schema?: unknown };
+    };
+  }> {
+    const body = await this.lastRequestBody();
+    if (!body) {
+      throw new Error("no request body was captured by the fetch stub");
+    }
+    return JSON.parse(body);
   }
 
   /** The `<tabs>` snapshot array embedded in the most recent request prompt. */

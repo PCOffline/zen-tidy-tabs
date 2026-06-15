@@ -33,8 +33,9 @@
       maxTokensCeiling: 8192,
       tokensPerTab: 24,                // max_tokens grows by this per tab...
       tokensBuffer: 256,               // ...plus this fixed buffer
-      temperature: 0.2,                // low → stable, repeatable clustering
-      seed: 7,
+      temperature: 0,                  // deterministic → repeatable clustering
+      seed: 7,                         // best-effort reproducibility; ignored by
+                                       // providers/models that don't support it
       timeoutMs: 90000,                // abort a hung request
       errorBodyMaxChars: 300,          // truncate HTTP error bodies in logs
       outputPreviewMaxChars: 200,      // truncate unparseable model output in logs
@@ -321,9 +322,10 @@
   // AI categorization
   // ============================================================================
   const ai = {
-    // The prompt encodes what a good grouping is, a naming rubric, hard
+    // The system prompt encodes what a good grouping is, a naming rubric, hard
     // constraints, an output contract, and worked examples — so even small,
-    // cheap models produce consistent, clean JSON.
+    // cheap models produce consistent, clean JSON. The per-run tab snapshot is
+    // sent separately as the user message (TIDY-18).
     buildPrompt(snapshot) {
       const tabCount = snapshot.length;
       const lastIndex = tabCount - 1;
@@ -342,9 +344,8 @@
         `the group the tab is CURRENTLY in). Treat "group" as a strong hint, not a`,
         `command. Use whatever fields are present; the title is always the primary signal.`,
         ``,
-        `<tabs>`,
-        JSON.stringify(snapshot),
-        `</tabs>`,
+        `The ${tabCount} tabs are provided in the user message as a JSON array,`,
+        `one object per tab.`,
         ``,
         `## What a good grouping looks like`,
         `- Group by what the user is DOING — a project, topic, game, or task —`,
@@ -409,43 +410,77 @@
       ].filter((line) => line !== "").join("\n");
     },
 
+    // The per-run tab snapshot, sent as the user message wrapped in <tabs> tags
+    // (the only variable input — TIDY-18).
+    buildUserContent(snapshot) {
+      return `<tabs>\n${JSON.stringify(snapshot)}\n</tabs>`;
+    },
+
+    // JSON Schema for Structured Outputs: a groups array of {name, tabs:[int]}.
+    // Index hygiene (coverage, dedup, single-tab budget) stays in parseGroups;
+    // this only pins the output shape (TIDY-16).
+    responseSchema() {
+      return {
+        type: "object",
+        additionalProperties: false,
+        required: ["groups"],
+        properties: {
+          groups: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["name", "tabs"],
+              properties: {
+                name: { type: "string" },
+                tabs: { type: "array", items: { type: "integer" } },
+              },
+            },
+          },
+        },
+      };
+    },
+
     async request(snapshot, apiKey, model) {
       const maxTokens = Math.min(
         CONFIG.api.maxTokensCeiling,
         Math.max(CONFIG.api.maxTokens, snapshot.length * CONFIG.api.tokensPerTab + CONFIG.api.tokensBuffer)
       );
-      const body = {
+      const base = {
         model,
         temperature: CONFIG.api.temperature,
         seed: CONFIG.api.seed,
         max_tokens: maxTokens,
-        // Ask the provider to guarantee a JSON object; we degrade gracefully if
-        // a model rejects it (see the retry below).
-        response_format: { type: "json_object" },
         messages: [
-          {
-            role: "system",
-            content:
-              "You are a precise tab-organizing engine. You reply with a single " +
-              "valid JSON object and nothing else: no markdown, no code fences, " +
-              "no commentary, no text before or after the JSON. Even when " +
-              "uncertain, you still return only valid JSON in the requested schema.",
-          },
-          { role: "user", content: ai.buildPrompt(snapshot) },
+          { role: "system", content: ai.buildPrompt(snapshot) },
+          { role: "user", content: ai.buildUserContent(snapshot) },
         ],
       };
 
-      try {
-        return await ai.post(body, apiKey);
-      } catch (e) {
-        // Some models/providers reject response_format. Retry once without it.
-        if (e?.status === 400 && /response_format|json/i.test(e.message || "")) {
-          Log.ai.warn(`Model "${body.model}" rejected response_format=json_object (HTTP 400); retrying once without it.`);
-          delete body.response_format;
+      // Prefer schema-enforced Structured Outputs; degrade gracefully for
+      // providers/models that reject it: json_schema → json_object → none.
+      const formats = [
+        { type: "json_schema", json_schema: { name: "tidy_groups", strict: true, schema: ai.responseSchema() } },
+        { type: "json_object" },
+        null,
+      ];
+      let lastError;
+      for (let i = 0; i < formats.length; i++) {
+        const body = formats[i] ? { ...base, response_format: formats[i] } : { ...base };
+        try {
           return await ai.post(body, apiKey);
+        } catch (e) {
+          const rejectsFormat = e?.status === 400 && /response_format|json[_ ]?schema|json/i.test(e.message || "");
+          if (rejectsFormat && i < formats.length - 1) {
+            const next = formats[i + 1];
+            Log.ai.warn(`Model "${model}" rejected response_format=${formats[i].type} (HTTP 400); retrying with ${next ? next.type : "no response_format"}.`);
+            lastError = e;
+            continue;
+          }
+          throw e;
         }
-        throw e;
       }
+      throw lastError;
     },
 
     // POST to OpenRouter with a hard timeout so a hung request can never lock
@@ -497,6 +532,22 @@
         const detail = data.error.message || JSON.stringify(data.error);
         Log.ai.error("OpenRouter returned an error payload:", detail);
         throw new Error("API error: " + detail);
+      }
+
+      // A reply cut off by the output token limit leaves partial, unparseable
+      // JSON; fail with a clear, actionable message instead of a generic parse
+      // error (TIDY-17).
+      if (data.choices?.[0]?.finish_reason === "length") {
+        Log.ai.error(
+          "Model response was truncated (finish_reason: length).",
+          "model:", data.model,
+          "| usage:", JSON.stringify(data.usage)
+        );
+        throw new Error(
+          "Model response was truncated before completing the JSON (hit the " +
+          "output token limit). Try tidying fewer tabs or use a model with a " +
+          "larger output budget."
+        );
       }
 
       const message = data.choices?.[0]?.message;
@@ -638,17 +689,6 @@
       return false;
     },
 
-    // Map of normalized group-name → group element in the active workspace.
-    existingByName() {
-      const map = new Map();
-      const section = dom.activeSection() || doc;
-      for (const groupEl of section.querySelectorAll("tab-group")) {
-        const key = normalizeName(getGroupName(groupEl));
-        if (key && !map.has(key)) map.set(key, groupEl);
-      }
-      return map;
-    },
-
     // Apply the model's plan by reconciling against existing groups in place:
     // groups whose name survives keep their position + color, only changed tabs
     // move, and abandoned groups dissolve. No nesting, minimal disruption.
@@ -656,31 +696,28 @@
       if (typeof gBrowser.addTabGroup !== "function") {
         throw new Error("gBrowser.addTabGroup is unavailable in this Zen build.");
       }
-      const section = dom.activeSection() || doc;
-      const existing = groups.existingByName();
-      // Snapshot the groups that existed BEFORE we touch anything, so we can
-      // evict the ones the plan empties out (see below).
-      const before = [...section.querySelectorAll("tab-group")];
+      groups.reconcile(plan, groups.existingFor(plan));
+    },
 
-      groups.reconcile(plan, existing);
-
-      // Synchronously remove any pre-existing group the plan emptied out. Native
-      // dissolve is animated AND deferred, so without this an empty husk keeps
-      // painting beneath the freshly built group for a frame (the re-tidy "two
-      // stacked groups" flicker). Emptiness is read from the live DOM, not the
-      // group's own `.tabs` list, which can lag a frame behind a reparent.
-      for (const el of before) {
-        if (!el.isConnected) continue;
-        if ([...el.querySelectorAll(TAB_SELECTOR)].some(tabs.isAlive)) continue;
-        try {
-          gBrowser.removeTabGroup?.(el);
-        } catch (e) {
-          Log.groups.debug("removeTabGroup failed while evicting an emptied group:", e?.message);
-        }
-        if (el.isConnected) {
-          try { el.remove(); } catch { /* already detached */ }
+    // Map of normalized name -> group element for the groups that currently hold
+    // the tabs this plan reorganizes. Derived from the source tabs' own `.group`
+    // (not a workspace-section scan): a re-tidy reconsiders already-grouped tabs,
+    // so their live groups are exactly the ones to reuse-in-place or dissolve.
+    // Section-scoped lookups miss them when the active section resolves wrong
+    // (e.g. after a workspace switch), which left the old groups undissolved and
+    // stacked, named, beneath the new layout (the re-tidy flicker; TIDY-9).
+    existingFor(plan) {
+      const map = new Map();
+      for (const group of plan) {
+        for (const tab of group.tabs) {
+          if (!tabs.isAlive(tab)) continue;
+          const el = tab.group;
+          if (!el) continue;
+          const key = normalizeName(getGroupName(el));
+          if (key && !map.has(key)) map.set(key, el);
         }
       }
+      return map;
     },
 
     // In-place reconcile against current groups. Groups whose name survives are
@@ -688,7 +725,6 @@
     // changed are moved. Genuinely new groups are created; groups the plan
     // abandoned empty out and dissolve.
     reconcile(plan, existing) {
-      const matched = new Set();
       const usedColors = new Set();
       const palette = CONFIG.grouping.colors;
       let paletteIndex = 0;
@@ -699,6 +735,19 @@
         usedColors.add(color);
         return color;
       };
+
+      // Dissolve the groups the plan abandons BEFORE building the new layout, so
+      // the old labelled groups never coexist with the freshly created ones (the
+      // re-tidy "two stacked groups" flicker; TIDY-9). Native group creation and
+      // dissolve are animated AND deferred, so an emptiness check that runs after
+      // creation races the tab move under load and leaves husks painted beneath
+      // the new groups. Detaching each tab to the top level and removing the now
+      // -empty element up front avoids that race entirely.
+      const planNames = new Set(plan.map((group) => normalizeName(group.name)));
+      for (const [name, el] of existing) {
+        if (planNames.has(name)) continue; // reused in place; keep it
+        groups.dissolve(el);
+      }
 
       for (const group of plan) {
         const live = group.tabs.filter(tabs.isAlive);
@@ -712,7 +761,6 @@
         const el = existing.get(normalizeName(group.name));
         if (el && typeof el.addTabs === "function") {
           // Keep this group in place; move in only the tabs not already here.
-          matched.add(el);
           usedColors.add(getGroupColor(el));
           const toAdd = live.filter((tab) => tab.group !== el);
           if (toAdd.length) {
@@ -726,14 +774,30 @@
           groups.create(live, group.name, color);
         }
       }
+    },
 
-      // Any existing group the plan didn't reuse has had its tabs pulled into
-      // other groups; dissolve whatever is left so it doesn't linger.
-      for (const [, el] of existing) {
-        if (matched.has(el) || !groups.hasLiveTabs(el)) continue;
-        try { el.ungroupTabs?.(); }
-        catch (e) { Log.groups.warn(`Failed to dissolve the abandoned group "${getGroupName(el) || "?"}".`, e); }
+    // Synchronously dissolve a group the re-tidy abandoned: detach every live
+    // tab to the top level (the tabs stay open) and remove the now-empty group
+    // element. Native ungroupTab/removeTabGroup are animated AND deferred, so
+    // under load they don't tear the element down in the same frame -- which is
+    // what let the old groups stay painted, named, beneath the new layout (the
+    // re-tidy "two stacked groups" flicker; TIDY-9). Stripping the name FIRST,
+    // synchronously, is the one thing we can guarantee in-frame: from that point
+    // the husk is an anonymous, emptying element, never a named group competing
+    // with the new ones. The detach + removal below (and the empty-group sweep)
+    // finish the actual teardown.
+    dissolve(el) {
+      try { el.label = ""; el.removeAttribute?.("label"); } catch { /* non-fatal */ }
+
+      for (const tab of [...getGroupTabs(el)].filter(tabs.isAlive)) {
+        if (typeof gBrowser.ungroupTab !== "function") break;
+        try { gBrowser.ungroupTab(tab); }
+        catch (e) { Log.groups.debug("Failed to detach a tab while dissolving an abandoned group:", e?.message); }
       }
+      if (groups.hasLiveTabs(el)) return; // teardown deferred; the empty-group sweep finishes it
+      try { gBrowser.removeTabGroup?.(el); }
+      catch (e) { Log.groups.debug("removeTabGroup failed while dissolving an abandoned group:", e?.message); }
+      if (el.isConnected) { try { el.remove(); } catch { /* already detached */ } }
     },
 
     // Is a group element holding at least one tab that isn't closing?

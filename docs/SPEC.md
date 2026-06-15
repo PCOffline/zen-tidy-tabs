@@ -164,6 +164,35 @@ in-place HTML input the script swaps in for the badge.
   whichever notification currently occupies the shared `zen-tidy-tabs-msg` slot.
   _Verified by: `tidy-run.spec.ts › a notification's auto-dismiss never removes a later notification`._
 
+- **TIDY-15** — **Deterministic sampling.** The model request sets `temperature: 0` and a
+  fixed `seed` so a given set of tabs clusters as repeatably as the provider allows.
+  `seed` is a *best-effort* reproducibility hint: providers and models that do not support
+  it (e.g. the Anthropic API, which has no seed parameter) silently ignore it, and
+  byte-for-byte determinism is never guaranteed across the heterogeneous OpenRouter model
+  pool.
+  _Verified by: `request.spec.ts › sends deterministic sampling parameters`._
+
+- **TIDY-16** — **Schema-enforced output contract.** The request asks the provider to
+  constrain the reply to the grouping schema via Structured Outputs
+  (`response_format: { type: "json_schema", strict: true }`), whose schema is
+  `{ groups: [{ name: string, tabs: integer[] }] }`. Because not every model supports it,
+  the contract **degrades gracefully** on an HTTP 400 rejection, in order:
+  `json_schema → json_object → none`. Plan parsing (TIDY-8) remains the sole authority on
+  index hygiene regardless of which contract the provider accepted.
+  _Verified by: `request.spec.ts › requests schema-enforced structured output` and
+  `› degrades to a looser output contract when the model rejects json_schema`._
+
+- **TIDY-17** — **Truncated-response handling.** If the reply is cut off by the output
+  token limit (`finish_reason: "length"`), the run fails with a message that names the
+  truncation and the token budget, instead of surfacing a generic "could not parse model
+  output" error.
+  _Verified by: `request.spec.ts › fails clearly when the model response is truncated`._
+
+- **TIDY-18** — **Prompt placement.** The role, grouping rubric, hard constraints, output
+  schema, and worked examples are sent as the **system** message; the per-run tab snapshot
+  (TIDY-5) is the **user** message, wrapped in `<tabs>` tags as the only variable input.
+  _Verified by: `request.spec.ts › puts the rubric in the system message and the snapshot in the user message`._
+
 ---
 
 ## 3. Group badge — inline rename (left-click)
