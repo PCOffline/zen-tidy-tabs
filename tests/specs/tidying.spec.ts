@@ -272,4 +272,77 @@ test.describe("Tidying", () => {
       expect(labels, `old group "${name}" is gone`).not.toContain(name);
     }
   });
+
+  // TIDY-19: a new group that sorts before a kept group in plan order must not
+  // be handed the kept group's colour.
+  test("a re-tidy never gives a new group a kept group's colour", async ({
+    zen,
+  }) => {
+    await zen.openTabs(6, "Colour Page ");
+    const n = await zen.collectCount();
+    expect(n, "should have tabs to tidy").toBeGreaterThanOrEqual(6);
+
+    // First tidy into two groups. "Keep" sorts first, so it draws the palette's
+    // first colour and "Temp" the second.
+    const first: GroupingPlan = {
+      groups: [
+        { name: "Keep", tabs: [0, 1, 2] },
+        { name: "Temp", tabs: [3, 4, 5] },
+      ],
+    };
+    await zen.installFetchStub(first);
+    try {
+      await zen.clickButton();
+      await zen.driver.wait(
+        async () => {
+          const labels = await zen.groupLabels();
+          return labels.includes("Keep") && labels.includes("Temp");
+        },
+        30_000,
+        "first tidy did not create Keep and Temp",
+        400,
+      );
+    } finally {
+      await zen.restoreFetch();
+    }
+
+    const keptColour = await zen.groupColor("Keep");
+    expect(keptColour, "kept group has a colour").not.toBe("");
+
+    // Re-tidy: a brand-new group ("Fresh") sorts BEFORE the kept group ("Keep"),
+    // so its colour is picked before the reconcile loop reaches Keep. Before the
+    // fix, that handed Fresh the very colour Keep still wears.
+    const second: GroupingPlan = {
+      groups: [
+        { name: "Fresh", tabs: [3, 4, 5] },
+        { name: "Keep", tabs: [0, 1, 2] },
+      ],
+    };
+    await zen.installFetchStub(second);
+    try {
+      await zen.clickButton();
+      await zen.driver.wait(
+        async () => {
+          const labels = await zen.groupLabels();
+          return (
+            labels.includes("Fresh") &&
+            labels.includes("Keep") &&
+            !labels.includes("Temp")
+          );
+        },
+        30_000,
+        "re-tidy did not converge to Fresh and Keep",
+        400,
+      );
+    } finally {
+      await zen.restoreFetch();
+    }
+
+    const freshColour = await zen.groupColor("Fresh");
+    expect(freshColour, "new group has a colour").not.toBe("");
+    expect(
+      freshColour,
+      "a new group never reuses the kept group's colour",
+    ).not.toBe(keptColour);
+  });
 });

@@ -582,6 +582,19 @@ export class ZenDriver {
     }, label);
   }
 
+  /** The `color` of the group whose label === `label`, or "" if none matches. */
+  groupColor(label: string): Promise<string> {
+    return this.exec((want: string) => {
+      for (const g of document.querySelectorAll<MozTabGroup>("tab-group")) {
+        const l = (g.label || g.getAttribute("label") || "").trim();
+        if (l === want) {
+          return (g.color || g.getAttribute("color") || "").trim();
+        }
+      }
+      return "";
+    }, label);
+  }
+
   /** Close every tab inside the group whose label === `label`. */
   async closeGroupTabs(label: string): Promise<void> {
     await this.exec((want: string) => {
