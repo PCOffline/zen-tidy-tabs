@@ -133,4 +133,72 @@ test.describe("Settings", () => {
       await zen.waitForNoOverlay();
     }
   });
+
+  // SETTINGS-5: the key-help link is a real, keyboard-operable control that opens
+  // the keys page and dismisses the modal.
+  test("the key-help link is keyboard-reachable and opens the keys page", async ({
+    zen,
+  }) => {
+    await zen.rightClickButton();
+    await zen.waitForOverlay();
+    try {
+      // It is a real anchor with an href, so the modal's focus trap can reach it.
+      const linkState = await zen.exec(() => {
+        const link = document.querySelector(".zen-tidy-tabs-link");
+        if (!link) {
+          return null;
+        }
+        const trapSelector =
+          "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])";
+        return {
+          href: link.getAttribute("href"),
+          inFocusTrap: link.matches(trapSelector),
+        };
+      });
+      expect(linkState, "the key-help link exists").not.toBeNull();
+      expect(linkState?.href, "the link has a real href").toContain(
+        "openrouter.ai/keys",
+      );
+      expect(linkState?.inFocusTrap, "the focus trap can reach the link").toBe(
+        true,
+      );
+
+      // Stub the trusted-link API to record the navigation instead of opening a
+      // real tab, then activate the link from the keyboard (Space).
+      const opened = await zen.exec(() => {
+        window.__zenTidyTabsOpenedLink = null;
+        window.__zenTidyTabsOrigOpenLink = window.openTrustedLinkIn;
+        window.openTrustedLinkIn = (url: string) => {
+          window.__zenTidyTabsOpenedLink = url;
+        };
+        const link = document.querySelector<HTMLElement>(".zen-tidy-tabs-link");
+        link?.focus();
+        link?.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: " ",
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        return window.__zenTidyTabsOpenedLink ?? null;
+      });
+      expect(
+        opened,
+        "activating the link via the keyboard opens the keys page",
+      ).toContain("openrouter.ai/keys");
+
+      // Activating the link dismisses the settings modal.
+      await zen.waitForNoOverlay();
+    } finally {
+      await zen.exec(() => {
+        if (window.__zenTidyTabsOrigOpenLink !== undefined) {
+          window.openTrustedLinkIn = window.__zenTidyTabsOrigOpenLink;
+          window.__zenTidyTabsOrigOpenLink = undefined;
+        }
+        return true;
+      });
+      await zen.pressEscape();
+      await zen.waitForNoOverlay();
+    }
+  });
 });
