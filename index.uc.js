@@ -888,11 +888,19 @@ Now output only the JSON object.`;
       const usedColors = new Set();
       const palette = CONFIG.grouping.colors;
       let paletteIndex = 0;
+      // One pass over the palette for an unused colour; only once every colour is
+      // taken do we accept a repeat (advancing the cursor so successive exhausted
+      // picks still cycle rather than all landing on the same colour). The cursor
+      // rolls across calls so distinct new groups get distinct colours (TIDY-19).
       const nextColor = () => {
-        let color;
-        do {
-          color = palette[paletteIndex++ % palette.length];
-        } while (usedColors.has(color) && paletteIndex <= palette.length);
+        for (let i = 0; i < palette.length; i++) {
+          const color = palette[paletteIndex++ % palette.length];
+          if (!usedColors.has(color)) {
+            usedColors.add(color);
+            return color;
+          }
+        }
+        const color = palette[paletteIndex++ % palette.length];
         usedColors.add(color);
         return color;
       };
@@ -908,6 +916,15 @@ Now output only the JSON object.`;
       for (const [name, el] of existing) {
         if (planNames.has(name)) continue; // reused in place; keep it
         groups.dissolve(el);
+      }
+
+      // Register every kept group's colour up front so a new group earlier in
+      // plan order can never be handed a colour a later kept group still wears
+      // (TIDY-19).
+      for (const group of plan) {
+        const el = existing.get(normalizeName(group.name));
+        if (el && typeof el.addTabs === "function")
+          usedColors.add(getGroupColor(el));
       }
 
       for (const group of plan) {
@@ -927,7 +944,6 @@ Now output only the JSON object.`;
         const el = existing.get(normalizeName(group.name));
         if (el && typeof el.addTabs === "function") {
           // Keep this group in place; move in only the tabs not already here.
-          usedColors.add(getGroupColor(el));
           const toAdd = live.filter((tab) => tab.group !== el);
           if (toAdd.length) {
             Log.groups.debug(

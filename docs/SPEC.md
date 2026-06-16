@@ -198,6 +198,15 @@ in-place HTML input the script swaps in for the badge.
   (TIDY-5) is the **user** message, wrapped in `<tabs>` tags as the only variable input.
   _Verified by: `request.spec.ts › puts the rubric in the system message and the snapshot in the user message`._
 
+- **TIDY-19** — **Distinct group colours.** When a plan is applied, every **new** group is
+  given a colour that differs from every kept group's colour and from every other new
+  group's colour, as long as the palette (`CONFIG.grouping.colors`) still has an unused
+  colour. Kept groups retain their own colour (TIDY-7); new groups draw from the palette,
+  skipping colours already in use — regardless of the order new and kept groups appear in
+  the plan. Once the plan needs more distinct groups than the palette holds, colours repeat
+  predictably (the palette is reused in order) rather than failing.
+  _Verified by: `tidying.spec.ts › a re-tidy never gives a new group a kept group's colour`._
+
 ---
 
 ## 3. Group badge — inline rename (left-click)
