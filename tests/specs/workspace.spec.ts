@@ -10,12 +10,10 @@ test.describe("Tidy control across workspaces", () => {
   });
 
   test("the tidy control follows the active workspace", async ({ zen }) => {
-    if (!(await zen.workspacesAvailable())) {
-      console.warn(
-        "Zen workspace API unavailable in this build — skipping CONTROL-7.",
-      );
-      return;
-    }
+    test.skip(
+      !(await zen.workspacesAvailable()),
+      "Zen workspace API unavailable in this build — CONTROL-7 cannot be exercised",
+    );
 
     // Some content so the sidebar (and any Clear control) renders normally.
     await zen.openTabs(3);

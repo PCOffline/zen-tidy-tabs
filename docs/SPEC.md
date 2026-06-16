@@ -117,7 +117,10 @@ in-place HTML input the script swaps in for the badge.
   group is **kept in place** — its position and colour are preserved and only the tabs
   that actually changed are moved in. Genuinely new groups are created; existing groups
   the plan abandons are dissolved.
-  _Verified by: `tidying.spec.ts › re-tidying never paints the old groups beneath the new ones`._
+  _Partially verified by: `tidying.spec.ts › re-tidying never paints the old groups beneath
+  the new ones` (a re-tidy reconciles against the existing groups and dissolves the ones the
+  plan abandons). The **keep-in-place** stability — a name-matched group preserving its
+  position and colour while only the changed tabs move — is **not yet asserted** (gap)._
 
   > Note: position/colour are preserved only when the planned name matches an existing
   > group's name (case/space-insensitive). If the model renames a group, that group is

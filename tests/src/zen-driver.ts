@@ -288,21 +288,39 @@ export class ZenDriver {
         return { exists: false };
       }
 
-      // Mirror dom.clearControl() loosely: an element whose label/text is "clear".
+      // Mirror dom.clearControl()/matchesClear() exactly: an element whose
+      // label or textContent is exactly "clear", or — for a childless element —
+      // whose ::before/::after content says "clear". The pseudo-element check is
+      // the part the old helper omitted, which could disagree with the script on
+      // builds that render Clear's text via CSS and route this test down the
+      // wrong branch.
       const findClear = (): Element | null => {
         const sel =
-          "toolbarbutton, button, label, span, hbox, vbox, toolbaritem, [label], [tooltiptext]";
+          "toolbarbutton, button, label, span, hbox, vbox, toolbaritem, div, image, [label], [tooltiptext]";
         for (const el of document.querySelectorAll(sel)) {
           if (el === btn) {
             continue;
           }
-          const label = (el.getAttribute("label") || "").trim().toLowerCase();
-          if (label === "clear") {
+          if (
+            (el.getAttribute("label") || "").trim().toLowerCase() === "clear"
+          ) {
             return el;
           }
-          const text = (el.textContent || "").trim().toLowerCase();
-          if (text === "clear") {
+          if ((el.textContent || "").trim().toLowerCase() === "clear") {
             return el;
+          }
+          if (el.children.length === 0) {
+            for (const pseudo of ["::before", "::after"]) {
+              try {
+                const content =
+                  window.getComputedStyle(el, pseudo).content || "";
+                if (/clear/i.test(content)) {
+                  return el;
+                }
+              } catch {
+                // detached node
+              }
+            }
           }
         }
         return null;
