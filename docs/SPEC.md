@@ -187,11 +187,16 @@ in-place HTML input the script swaps in for the badge.
   _Verified by: `request.spec.ts › requests schema-enforced structured output` and
   `› degrades to a looser output contract when the model rejects json_schema`._
 
-- **TIDY-17** — **Truncated-response handling.** If the reply is cut off by the output
-  token limit (`finish_reason: "length"`), the run fails with a message that names the
+- **TIDY-17** — **Truncated- and empty-response handling.** If the reply is cut off by the
+  output token limit (`finish_reason: "length"`), the run fails with a message that names the
   truncation and the token budget, instead of surfacing a generic "could not parse model
-  output" error.
-  _Verified by: `request.spec.ts › fails clearly when the model response is truncated`._
+  output" error. Likewise, a reply with **no assistant content** — including a reasoning-only
+  reply where the model puts prose under `message.reasoning` but leaves `content` empty —
+  fails with the empty-completion error (which points at a concrete instruct model). The
+  reasoning text is **never** fed to the JSON parser, even when it happens to contain a
+  `{…}` block.
+  _Verified by: `request.spec.ts › fails clearly when the model response is truncated` and
+  `› rejects a reasoning-only reply instead of parsing the reasoning prose`._
 
 - **TIDY-18** — **Prompt placement.** The role, grouping rubric, hard constraints, output
   schema, and worked examples are sent as the **system** message; the per-run tab snapshot

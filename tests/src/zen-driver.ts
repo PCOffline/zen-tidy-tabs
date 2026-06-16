@@ -1879,6 +1879,52 @@ export class ZenDriver {
   }
 
   /**
+   * Replace fetch with one that returns a reasoning-only reply: empty
+   * `content` but non-empty `message.reasoning` (as some router models do).
+   * The run must reject it as an empty completion (TIDY-17), never parse the
+   * reasoning prose as JSON — even though that prose contains a `{...}` block.
+   */
+  async installFetchReasoningStub(): Promise<void> {
+    const payload = JSON.stringify({
+      id: "zen-tidy-tabs-stub",
+      model: "zen-tidy-tabs-stub",
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: "",
+            reasoning:
+              'Let me think. I could group these as {"groups":[{"name":"Draft","tabs":[0,1]}]} but I am not sure yet.',
+          },
+          finish_reason: "stop",
+        },
+      ],
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    });
+    await this.exec((body: string) => {
+      if (!window.__zenTidyTabsOrigFetch) {
+        window.__zenTidyTabsOrigFetch = window.fetch;
+      }
+      window.__zenTidyTabsFetchCalls = 0;
+      window.__zenTidyTabsLastBody = null;
+      window.fetch = (_url: unknown, init?: { body?: unknown }) => {
+        window.__zenTidyTabsFetchCalls =
+          (window.__zenTidyTabsFetchCalls ?? 0) + 1;
+        window.__zenTidyTabsLastBody =
+          init?.body == null ? null : String(init.body);
+        return Promise.resolve(
+          new Response(body, {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      };
+      return true;
+    }, payload);
+  }
+
+  /**
    * Replace fetch with one that rejects the first request with HTTP 400 (as a
    * provider that does not support `response_format: json_schema` would), then
    * succeeds on every subsequent request with `grouping`. Exercises the
