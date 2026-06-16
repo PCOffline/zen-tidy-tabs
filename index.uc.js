@@ -214,7 +214,7 @@
           if (!el.children.length) {
             try {
               for (const pseudo of ["::before", "::after"]) {
-                if (/clear/i.test(win.getComputedStyle(el, pseudo).content || "")) return el;
+                if (/clear/i.test(getComputedStyle(el, pseudo).content || "")) return el;
               }
             } catch { /* detached node */ }
           }
@@ -301,7 +301,7 @@
     formatUrl(spec, mode) {
       if (!spec || mode === "minimal") return "";
       if (mode === "compact") {
-        try { return new win.URL(spec).hostname; } catch { return ""; }
+        try { return new URL(spec).hostname; } catch { return ""; }
       }
       return spec.split("?")[0].split("#")[0].slice(0, CONFIG.snapshot.urlMax);
     },
@@ -337,80 +337,86 @@
         Math.max(CONFIG.grouping.minGroups, Math.ceil(tabCount / CONFIG.grouping.targetTabsPerGroup))
       );
       const hasGroups = snapshot.some((tab) => tab.group);
-      return [
-        `You are "Tidy", an engine that organizes a browser sidebar's open tabs`,
-        `into a small set of clean, intuitive groups — like Arc's "Tidy Tabs".`,
-        ``,
-        `## Input`,
-        `${tabCount} tabs. Each object has {"i": <index 0-${lastIndex}>, "title": <string>}`,
-        `and may also include "url": <string> and "group": <string> (the name of`,
-        `the group the tab is CURRENTLY in). Treat "group" as a strong hint, not a`,
-        `command. Use whatever fields are present; the title is always the primary signal.`,
-        ``,
-        `The ${tabCount} tabs are provided in the user message as a JSON array,`,
-        `one object per tab.`,
-        ``,
-        `## What a good grouping looks like`,
-        `- Group by what the user is DOING — a project, topic, game, or task —`,
-        `  not merely by website. Tabs from different domains often belong`,
-        `  together (a wiki page, a YouTube video, and a store page about the`,
-        `  same game are one group).`,
-        `- Name an EXPANDABLE CATEGORY, not the single tab in front of you. A`,
-        `  group should be something later tabs could naturally join: "Wynncraft"`,
-        `  over "Gaming", "Chicken Recipes" over "Grandma's Chicken Soup". Don't`,
-        `  make a group as specific as possible — as specific as is still reusable.`,
-        `- Prefer multi-tab groups. A single-tab group is fine ONLY when its name`,
-        `  is a real category a later tab could join, never when it just`,
-        `  re-describes that one tab.`,
-        `- Keep granularity consistent: groups of roughly comparable size.`,
-        `  Avoid one giant catch-all sitting next to several singletons.`,
-        `- Merge near-duplicates (the same product, repeated searches) together.`,
-        hasGroups
-          ? `- STABILITY: many tabs already have a "group" name. When a tab's current\n  group still makes sense, KEEP it there and reuse that exact name — do not\n  rename or reshuffle a sensible group just to change it. Prefer adding new\n  tabs into a fitting existing group over inventing a parallel one.\n- REORGANIZE only with a clear reason: e.g. new tabs make a BROADER category\n  sensible (an existing "Cooking" group plus new chicken-care tabs becomes\n  "Chicken"), or the current split is clearly wrong. A broader, more accurate\n  category is worth moving older tabs for; cosmetic churn is not.`
-          : ``,
-        ``,
-        `## Grounding (critical)`,
-        `- Use ONLY the titles and URLs given. Never invent a theme that the`,
-        `  tabs do not clearly support. If no tab is about sports, there is no`,
-        `  "Sports" group. Every group must be justified by its members.`,
-        ``,
-        `## Avoid`,
-        `- A vague mega-group holding most tabs.`,
-        `- Many one-tab groups when those tabs share an obvious theme.`,
-        `- A one-tab group whose name just describes that tab (a recipe group`,
-        `  named after one dish) instead of an expandable category.`,
-        `- Two different groups that mean the same thing.`,
-        ``,
-        `## Naming`,
-        `- 1-3 words, Title Case, human-readable. No emojis, no quotes.`,
-        `- Name the shared theme, not a list of the items.`,
-        `- "Other" is a LAST RESORT — only for a tab that fits no reasonable`,
-        `  category, or a pile of mutually unrelated tabs. Never reach for it when`,
-        `  a genuine expandable category fits. Avoid "Misc", "Various", "General",`,
-        `  "Web", and "Stuff" entirely; use "Other" if you truly must.`,
-        ``,
-        `## Hard constraints (must all hold)`,
-        `1. Produce between 1 and ${maxGroups} groups (1 is fine if every tab shares one theme).`,
-        `2. Every index 0-${lastIndex} appears in EXACTLY ONE group.`,
-        `   Never skip an index, never repeat one, never invent one out of range.`,
-        `3. Output ONLY a single JSON object matching the schema — no prose,`,
-        `   no markdown, no code fences.`,
-        ``,
-        `## Output schema`,
-        `{"groups":[{"name":"<Title Case label>","tabs":[<indices>]}]}`,
-        ``,
-        `## Examples`,
-        `Input: [{"i":0,"title":"Horses - Wynncraft Wiki","url":"wiki.wynncraft.com/horses"},{"i":1,"title":"Wynncraft Market","url":"trade.wynncraft.com"},{"i":2,"title":"Best Beef Chili Recipe","url":"allrecipes.com/chili"},{"i":3,"title":"Van Gogh Mouse Pad - AliExpress","url":"aliexpress.com/x"},{"i":4,"title":"Monet Mouse Pad - AliExpress","url":"aliexpress.com/y"}]`,
-        `Output: {"groups":[{"name":"Wynncraft","tabs":[0,1]},{"name":"Mouse Pad Shopping","tabs":[3,4]},{"name":"Recipes","tabs":[2]}]}`,
-        ``,
-        `Input (all one theme): [{"i":0,"title":"React useEffect docs","url":"react.dev"},{"i":1,"title":"React Router tutorial","url":"reactrouter.com"},{"i":2,"title":"Why my React app re-renders","url":"stackoverflow.com"}]`,
-        `Output: {"groups":[{"name":"React","tabs":[0,1,2]}]}`,
-        ``,
-        `Input (one solid theme + unrelated odds and ends): [{"i":0,"title":"Rust ownership - The Rust Book"},{"i":1,"title":"Tokio async tutorial"},{"i":2,"title":"Why won't my future compile - stackoverflow"},{"i":3,"title":"DMV appointment booking"},{"i":4,"title":"Local weather - today"}]`,
-        `Output: {"groups":[{"name":"Rust","tabs":[0,1,2]},{"name":"Other","tabs":[3,4]}]}`,
-        ``,
-        `Now output only the JSON object.`,
-      ].filter((line) => line !== "").join("\n");
+      const stability = hasGroups
+        ? `
+- STABILITY: many tabs already have a "group" name. When a tab's current
+  group still makes sense, KEEP it there and reuse that exact name — do not
+  rename or reshuffle a sensible group just to change it. Prefer adding new
+  tabs into a fitting existing group over inventing a parallel one.
+- REORGANIZE only with a clear reason: e.g. new tabs make a BROADER category
+  sensible (an existing "Cooking" group plus new chicken-care tabs becomes
+  "Chicken"), or the current split is clearly wrong. A broader, more accurate
+  category is worth moving older tabs for; cosmetic churn is not.`
+        : "";
+      return `You are "Tidy", an engine that organizes a browser sidebar's open tabs
+into a small set of clean, intuitive groups — like Arc's "Tidy Tabs".
+
+## Input
+${tabCount} tabs. Each object has {"i": <index 0-${lastIndex}>, "title": <string>}
+and may also include "url": <string> and "group": <string> (the name of
+the group the tab is CURRENTLY in). Treat "group" as a strong hint, not a
+command. Use whatever fields are present; the title is always the primary signal.
+
+The ${tabCount} tabs are provided in the user message as a JSON array,
+one object per tab.
+
+## What a good grouping looks like
+- Group by what the user is DOING — a project, topic, game, or task —
+  not merely by website. Tabs from different domains often belong
+  together (a wiki page, a YouTube video, and a store page about the
+  same game are one group).
+- Name an EXPANDABLE CATEGORY, not the single tab in front of you. A
+  group should be something later tabs could naturally join: "Wynncraft"
+  over "Gaming", "Chicken Recipes" over "Grandma's Chicken Soup". Don't
+  make a group as specific as possible — as specific as is still reusable.
+- Prefer multi-tab groups. A single-tab group is fine ONLY when its name
+  is a real category a later tab could join, never when it just
+  re-describes that one tab.
+- Keep granularity consistent: groups of roughly comparable size.
+  Avoid one giant catch-all sitting next to several singletons.
+- Merge near-duplicates (the same product, repeated searches) together.${stability}
+
+## Grounding (critical)
+- Use ONLY the titles and URLs given. Never invent a theme that the
+  tabs do not clearly support. If no tab is about sports, there is no
+  "Sports" group. Every group must be justified by its members.
+
+## Avoid
+- A vague mega-group holding most tabs.
+- Many one-tab groups when those tabs share an obvious theme.
+- A one-tab group whose name just describes that tab (a recipe group
+  named after one dish) instead of an expandable category.
+- Two different groups that mean the same thing.
+
+## Naming
+- 1-3 words, Title Case, human-readable. No emojis, no quotes.
+- Name the shared theme, not a list of the items.
+- "Other" is a LAST RESORT — only for a tab that fits no reasonable
+  category, or a pile of mutually unrelated tabs. Never reach for it when
+  a genuine expandable category fits. Avoid "Misc", "Various", "General",
+  "Web", and "Stuff" entirely; use "Other" if you truly must.
+
+## Hard constraints (must all hold)
+1. Produce between 1 and ${maxGroups} groups (1 is fine if every tab shares one theme).
+2. Every index 0-${lastIndex} appears in EXACTLY ONE group.
+   Never skip an index, never repeat one, never invent one out of range.
+3. Output ONLY a single JSON object matching the schema — no prose,
+   no markdown, no code fences.
+
+## Output schema
+{"groups":[{"name":"<Title Case label>","tabs":[<indices>]}]}
+
+## Examples
+Input: [{"i":0,"title":"Horses - Wynncraft Wiki","url":"wiki.wynncraft.com/horses"},{"i":1,"title":"Wynncraft Market","url":"trade.wynncraft.com"},{"i":2,"title":"Best Beef Chili Recipe","url":"allrecipes.com/chili"},{"i":3,"title":"Van Gogh Mouse Pad - AliExpress","url":"aliexpress.com/x"},{"i":4,"title":"Monet Mouse Pad - AliExpress","url":"aliexpress.com/y"}]
+Output: {"groups":[{"name":"Wynncraft","tabs":[0,1]},{"name":"Mouse Pad Shopping","tabs":[3,4]},{"name":"Recipes","tabs":[2]}]}
+
+Input (all one theme): [{"i":0,"title":"React useEffect docs","url":"react.dev"},{"i":1,"title":"React Router tutorial","url":"reactrouter.com"},{"i":2,"title":"Why my React app re-renders","url":"stackoverflow.com"}]
+Output: {"groups":[{"name":"React","tabs":[0,1,2]}]}
+
+Input (one solid theme + unrelated odds and ends): [{"i":0,"title":"Rust ownership - The Rust Book"},{"i":1,"title":"Tokio async tutorial"},{"i":2,"title":"Why won't my future compile - stackoverflow"},{"i":3,"title":"DMV appointment booking"},{"i":4,"title":"Local weather - today"}]
+Output: {"groups":[{"name":"Rust","tabs":[0,1,2]},{"name":"Other","tabs":[3,4]}]}
+
+Now output only the JSON object.`;
     },
 
     // The per-run tab snapshot, sent as the user message wrapped in <tabs> tags
@@ -852,7 +858,7 @@
       win.__zenTidyTabsEmptyWatcher = true;
       const root = doc.getElementById("tabbrowser-tabs") || doc.documentElement;
       let pending = null;
-      const observer = new win.MutationObserver(() => {
+      const observer = new MutationObserver(() => {
         if (pending) return;
         pending = setTimeout(() => { pending = null; groups.removeEmpty(); }, CONFIG.timing.emptyWatcherDebounceMs);
       });
@@ -1307,7 +1313,7 @@
         editor.cancelInline();
         // Defer past this gesture: opening the XUL popup synchronously lets the
         // gesture's trailing mouseup roll it straight back up.
-        win.setTimeout(() => {
+        setTimeout(() => {
           try {
             gBrowser.tabGroupMenu?.openEditModal(group);
             // Apply our tweaks (hide "Save and close", repair "Ungroup tabs")
@@ -1346,7 +1352,7 @@
       // Copy the badge's own look (color, background, font, padding, shape) onto
       // the input so the rename feels in-place rather than like a form field.
       // Read while the label is still rendered, then hand its spot to the input.
-      const cs = win.getComputedStyle(labelEl);
+      const cs = getComputedStyle(labelEl);
       const inherited = [
         "fontFamily", "fontSize", "fontWeight", "fontStyle", "letterSpacing",
         "lineHeight", "color", "backgroundColor", "backgroundImage",
@@ -1705,7 +1711,7 @@
   // ============================================================================
   const diag = {
     pseudo(el, which) {
-      try { return win.getComputedStyle(el, which).content || ""; } catch { return ""; }
+      try { return getComputedStyle(el, which).content || ""; } catch { return ""; }
     },
 
     path(el, depth = 8) {
