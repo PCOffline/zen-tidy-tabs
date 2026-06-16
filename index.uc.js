@@ -20,25 +20,25 @@
 
     // Preference keys (Services.prefs / about:config).
     prefs: {
-      apiKey: "zen-tidy-tabs.apikey",          // OpenRouter key (sk-or-v1-...)
-      model: "zen-tidy-tabs.model",            // optional model slug override
-      labelStyle: "zen-tidy-tabs.labelstyle",  // "filled" | "text"
-      urlMode: "zen-tidy-tabs.urlmode",        // "detailed" | "compact" | "minimal"
+      apiKey: "zen-tidy-tabs.apikey", // OpenRouter key (sk-or-v1-...)
+      model: "zen-tidy-tabs.model", // optional model slug override
+      labelStyle: "zen-tidy-tabs.labelstyle", // "filled" | "text"
+      urlMode: "zen-tidy-tabs.urlmode", // "detailed" | "compact" | "minimal"
     },
 
     api: {
       endpoint: "https://openrouter.ai/api/v1/chat/completions",
       defaultModel: "openai/gpt-4o-mini",
-      maxTokens: 2048,                 // floor; scaled up with tab count
+      maxTokens: 2048, // floor; scaled up with tab count
       maxTokensCeiling: 8192,
-      tokensPerTab: 24,                // max_tokens grows by this per tab...
-      tokensBuffer: 256,               // ...plus this fixed buffer
-      temperature: 0,                  // deterministic → repeatable clustering
-      seed: 7,                         // best-effort reproducibility; ignored by
-                                       // providers/models that don't support it
-      timeoutMs: 90000,                // abort a hung request
-      errorBodyMaxChars: 300,          // truncate HTTP error bodies in logs
-      outputPreviewMaxChars: 200,      // truncate unparseable model output in logs
+      tokensPerTab: 24, // max_tokens grows by this per tab...
+      tokensBuffer: 256, // ...plus this fixed buffer
+      temperature: 0, // deterministic → repeatable clustering
+      seed: 7, // best-effort reproducibility; ignored by
+      // providers/models that don't support it
+      timeoutMs: 90000, // abort a hung request
+      errorBodyMaxChars: 300, // truncate HTTP error bodies in logs
+      outputPreviewMaxChars: 200, // truncate unparseable model output in logs
       referer: "https://github.com/PCOffline/zen-tidy-tabs", // OpenRouter attribution
       title: "Zen Tidy Tabs",
     },
@@ -46,8 +46,8 @@
     ui: {
       controlId: "zen-tidy-tabs-button",
       styleId: "zen-tidy-tabs-style",
-      overlayId: "zen-tidy-tabs-overlay",       // SETTINGS-1: spec-locked literal
-      notificationValue: "zen-tidy-tabs-msg",   // TIDY-14: spec-locked literal
+      overlayId: "zen-tidy-tabs-overlay", // SETTINGS-1: spec-locked literal
+      notificationValue: "zen-tidy-tabs-msg", // TIDY-14: spec-locked literal
       label: "🧹 Tidy",
       busyLabel: "↻ Tidying…",
       tooltip: "Tidy tabs with AI",
@@ -63,7 +63,7 @@
     // without touching code.
     panel: {
       hideSaveAndClose: true, // PANEL-3: hide the redundant "Save and close group"
-      overrideUngroup: true,  // PANEL-4: run "Ungroup tabs" ourselves (Zen's is inert)
+      overrideUngroup: true, // PANEL-4: run "Ungroup tabs" ourselves (Zen's is inert)
       ids: {
         saveAndClose: "tabGroupEditor_saveAndCloseGroup",
         ungroup: "tabGroupEditor_ungroupTabs",
@@ -71,27 +71,37 @@
     },
 
     grouping: {
-      colors: ["blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange", "gray"],
-      minTabs: 3,              // refuse to tidy fewer than this
-      minGroups: 2,            // lower bound for the model's group cap
-      maxGroups: 8,            // upper bound for the model's group cap
-      targetTabsPerGroup: 3,   // group cap scales as ceil(tabCount / this)
+      colors: [
+        "blue",
+        "red",
+        "yellow",
+        "green",
+        "pink",
+        "purple",
+        "cyan",
+        "orange",
+        "gray",
+      ],
+      minTabs: 3, // refuse to tidy fewer than this
+      minGroups: 2, // lower bound for the model's group cap
+      maxGroups: 8, // upper bound for the model's group cap
+      targetTabsPerGroup: 3, // group cap scales as ceil(tabCount / this)
     },
 
     snapshot: {
-      titleMax: 160,  // truncate long titles before sending to the model
-      urlMax: 120,    // truncate long URLs too
+      titleMax: 160, // truncate long titles before sending to the model
+      urlMax: 120, // truncate long URLs too
     },
 
     // Timing constants in ms (counts where noted) for debounces, polling, retries.
     timing: {
-      emptyCheckDelayMs: 80,         // delay before the first empty-group sweep
-      emptyCheckIntervalMs: 150,     // interval between empty-group sweeps
-      emptyCheckMaxTries: 6,         // number of empty-group sweeps per schedule
-      emptyWatcherDebounceMs: 500,   // debounce for the drag-driven empty watcher
-      notifyDurationMs: 6000,        // how long a notification stays up
-      mountRetryMs: 250,             // interval between mount attempts
-      mountMaxAttempts: 40,          // give up mounting after this many attempts
+      emptyCheckDelayMs: 80, // delay before the first empty-group sweep
+      emptyCheckIntervalMs: 150, // interval between empty-group sweeps
+      emptyCheckMaxTries: 6, // number of empty-group sweeps per schedule
+      emptyWatcherDebounceMs: 500, // debounce for the drag-driven empty watcher
+      notifyDurationMs: 6000, // how long a notification stays up
+      mountRetryMs: 250, // interval between mount attempts
+      mountMaxAttempts: 40, // give up mounting after this many attempts
     },
   };
 
@@ -106,7 +116,9 @@
       info: (...args) => console.info(tag, ...args),
       warn: (...args) => console.warn(tag, ...args),
       error: (...args) => console.error(tag, ...args),
-      debug: (...args) => { if (CONFIG.debug) console.debug(tag, ...args); },
+      debug: (...args) => {
+        if (CONFIG.debug) console.debug(tag, ...args);
+      },
     };
   };
   const Log = {
@@ -133,19 +145,26 @@
         const mostRecent = Services.wm.getMostRecentWindow("navigator:browser");
         if (mostRecent?.gBrowser) browserWindow = mostRecent;
       } catch (e) {
-        Log.init.error("Could not resolve a browser window via Services.wm; gBrowser is unavailable.", e);
+        Log.init.error(
+          "Could not resolve a browser window via Services.wm; gBrowser is unavailable.",
+          e,
+        );
       }
     }
     return browserWindow?.gBrowser
-      ? { win: browserWindow, doc: browserWindow.document, gBrowser: browserWindow.gBrowser }
+      ? {
+          win: browserWindow,
+          doc: browserWindow.document,
+          gBrowser: browserWindow.gBrowser,
+        }
       : null;
   })();
 
   if (!env) {
     Log.init.error(
       "Startup aborted: no window with gBrowser was found. Run this in the " +
-      "Browser Console (Ctrl+Shift+J) with devtools.chrome.enabled = true — " +
-      "the page web console (F12) cannot access the browser chrome."
+        "Browser Console (Ctrl+Shift+J) with devtools.chrome.enabled = true — " +
+        "the page web console (F12) cannot access the browser chrome.",
     );
     return;
   }
@@ -159,11 +178,18 @@
   // ============================================================================
   const TAB_SELECTOR = "tab, .tabbrowser-tab";
   const normalizeName = (name) => (name || "").trim().toLowerCase();
-  const getGroupName = (el) => (el?.label || el?.getAttribute?.("label") || "").trim();
+  const getGroupName = (el) =>
+    (el?.label || el?.getAttribute?.("label") || "").trim();
   const getGroupColor = (el) => el?.color || el?.getAttribute?.("color") || "";
   const getGroupTabs = (el) => el.tabs || el.querySelectorAll(TAB_SELECTOR);
-  const setGroupName = (el, name) => { el.label = name; el.setAttribute("label", name); };
-  const setGroupColor = (el, color) => { el.color = color; el.setAttribute("color", color); };
+  const setGroupName = (el, name) => {
+    el.label = name;
+    el.setAttribute("label", name);
+  };
+  const setGroupColor = (el, color) => {
+    el.color = color;
+    el.setAttribute("color", color);
+  };
 
   // ============================================================================
   // DOM access — every selector strategy is isolated here, so there is exactly
@@ -199,24 +225,34 @@
     // workspace's Clear, mounting the twin in a workspace the user can't see
     // (CONTROL-7).
     clearControl() {
-      const scopes = [dom.activeWorkspaceEl(), dom.activeSection(), doc].filter(Boolean);
+      const scopes = [dom.activeWorkspaceEl(), dom.activeSection(), doc].filter(
+        Boolean,
+      );
       const seen = new Set();
-      const selector = "toolbarbutton, button, label, span, hbox, vbox, toolbaritem, [label], [tooltiptext]";
+      const selector =
+        "toolbarbutton, button, label, span, hbox, vbox, toolbaritem, [label], [tooltiptext]";
 
       for (const scope of scopes) {
         for (const el of scope.querySelectorAll(selector)) {
           if (seen.has(el)) continue;
           seen.add(el);
 
-          if ((el.getAttribute?.("label") || "").trim().toLowerCase() === "clear") return el;
-          if ((el.textContent || "").trim().toLowerCase() === "clear") return el;
+          if (
+            (el.getAttribute?.("label") || "").trim().toLowerCase() === "clear"
+          )
+            return el;
+          if ((el.textContent || "").trim().toLowerCase() === "clear")
+            return el;
 
           if (!el.children.length) {
             try {
               for (const pseudo of ["::before", "::after"]) {
-                if (/clear/i.test(getComputedStyle(el, pseudo).content || "")) return el;
+                if (/clear/i.test(getComputedStyle(el, pseudo).content || ""))
+                  return el;
               }
-            } catch { /* detached node */ }
+            } catch {
+              /* detached node */
+            }
           }
         }
       }
@@ -226,7 +262,9 @@
     // First normal (non-pinned, non-essential) tab or group in a section. Used
     // as a fallback mount anchor when there's no Clear control to sit beside.
     firstNormalNode(section) {
-      for (const el of section.querySelectorAll("tab-group, tab, .tabbrowser-tab")) {
+      for (const el of section.querySelectorAll(
+        "tab-group, tab, .tabbrowser-tab",
+      )) {
         if (dom.isGroupEl(el)) return el;
         if (!(el.pinned || el.hasAttribute?.("zen-essential"))) return el;
       }
@@ -234,14 +272,19 @@
     },
 
     isGroupEl(el) {
-      return (el?.tagName || "").toLowerCase() === "tab-group" || el?.classList?.contains?.("tab-group");
+      return (
+        (el?.tagName || "").toLowerCase() === "tab-group" ||
+        el?.classList?.contains?.("tab-group")
+      );
     },
 
     describe(el) {
       if (!el) return "null";
-      return (el.tagName || "?").toLowerCase() +
+      return (
+        (el.tagName || "?").toLowerCase() +
         (el.id ? `#${el.id}` : "") +
-        (el.className ? `.${String(el.className).trim().split(/\s+/)[0]}` : "");
+        (el.className ? `.${String(el.className).trim().split(/\s+/)[0]}` : "")
+      );
     },
   };
 
@@ -250,7 +293,11 @@
   // ============================================================================
   const prefs = {
     get(name, fallback = "") {
-      try { return Services.prefs.getStringPref(name, fallback); } catch { return fallback; }
+      try {
+        return Services.prefs.getStringPref(name, fallback);
+      } catch {
+        return fallback;
+      }
     },
     set(name, value) {
       try {
@@ -260,12 +307,20 @@
         Log.config.error(`Failed to save preference "${name}".`, e);
       }
     },
-    apiKey() { return prefs.get(CONFIG.prefs.apiKey); },
-    model() { return prefs.get(CONFIG.prefs.model, CONFIG.api.defaultModel); },
-    labelStyle() { return prefs.get(CONFIG.prefs.labelStyle, "filled"); },
+    apiKey() {
+      return prefs.get(CONFIG.prefs.apiKey);
+    },
+    model() {
+      return prefs.get(CONFIG.prefs.model, CONFIG.api.defaultModel);
+    },
+    labelStyle() {
+      return prefs.get(CONFIG.prefs.labelStyle, "filled");
+    },
     urlMode() {
       const mode = prefs.get(CONFIG.prefs.urlMode, "detailed");
-      return ["detailed", "compact", "minimal"].includes(mode) ? mode : "detailed";
+      return ["detailed", "compact", "minimal"].includes(mode)
+        ? mode
+        : "detailed";
     },
   };
 
@@ -281,19 +336,28 @@
       return gBrowser.tabs.filter((tab) => {
         if (tab.pinned || tab.hidden || tab.closing) return false;
         if (!includeGrouped && tab.group) return false;
-        if (tab.hasAttribute("zen-empty-tab") || tab.hasAttribute("zen-glance-tab")) return false;
+        if (
+          tab.hasAttribute("zen-empty-tab") ||
+          tab.hasAttribute("zen-glance-tab")
+        )
+          return false;
         const tabWorkspace = tab.getAttribute("zen-workspace-id");
-        if (workspaceId && tabWorkspace && tabWorkspace !== workspaceId) return false;
+        if (workspaceId && tabWorkspace && tabWorkspace !== workspaceId)
+          return false;
         return true;
       });
     },
 
     // A tab is usable only if it wasn't closed during the async API call.
     isAlive(tab) {
-      return tab && !tab.closing && tab.isConnected && gBrowser.tabs.includes(tab);
+      return (
+        tab && !tab.closing && tab.isConnected && gBrowser.tabs.includes(tab)
+      );
     },
 
-    title(tab) { return (tab.label || "").slice(0, CONFIG.snapshot.titleMax); },
+    title(tab) {
+      return (tab.label || "").slice(0, CONFIG.snapshot.titleMax);
+    },
 
     // The URL string sent for a tab, per the user's privacy preference. Query
     // and hash are always stripped:
@@ -301,7 +365,11 @@
     formatUrl(spec, mode) {
       if (!spec || mode === "minimal") return "";
       if (mode === "compact") {
-        try { return new URL(spec).hostname; } catch { return ""; }
+        try {
+          return new URL(spec).hostname;
+        } catch {
+          return "";
+        }
       }
       return spec.split("?")[0].split("#")[0].slice(0, CONFIG.snapshot.urlMax);
     },
@@ -312,7 +380,10 @@
       const mode = prefs.urlMode();
       return list.map((tab, i) => {
         const entry = { i, title: tabs.title(tab) };
-        const url = tabs.formatUrl(tab.linkedBrowser?.currentURI?.spec || "", mode);
+        const url = tabs.formatUrl(
+          tab.linkedBrowser?.currentURI?.spec || "",
+          mode,
+        );
         if (url) entry.url = url;
         const group = getGroupName(tab.group);
         if (group) entry.group = group;
@@ -334,7 +405,10 @@
       const lastIndex = tabCount - 1;
       const maxGroups = Math.min(
         CONFIG.grouping.maxGroups,
-        Math.max(CONFIG.grouping.minGroups, Math.ceil(tabCount / CONFIG.grouping.targetTabsPerGroup))
+        Math.max(
+          CONFIG.grouping.minGroups,
+          Math.ceil(tabCount / CONFIG.grouping.targetTabsPerGroup),
+        ),
       );
       const hasGroups = snapshot.some((tab) => tab.group);
       const stability = hasGroups
@@ -453,7 +527,10 @@ Now output only the JSON object.`;
     async request(snapshot, apiKey, model) {
       const maxTokens = Math.min(
         CONFIG.api.maxTokensCeiling,
-        Math.max(CONFIG.api.maxTokens, snapshot.length * CONFIG.api.tokensPerTab + CONFIG.api.tokensBuffer)
+        Math.max(
+          CONFIG.api.maxTokens,
+          snapshot.length * CONFIG.api.tokensPerTab + CONFIG.api.tokensBuffer,
+        ),
       );
       const base = {
         model,
@@ -469,20 +546,33 @@ Now output only the JSON object.`;
       // Prefer schema-enforced Structured Outputs; degrade gracefully for
       // providers/models that reject it: json_schema → json_object → none.
       const formats = [
-        { type: "json_schema", json_schema: { name: "tidy_groups", strict: true, schema: ai.responseSchema() } },
+        {
+          type: "json_schema",
+          json_schema: {
+            name: "tidy_groups",
+            strict: true,
+            schema: ai.responseSchema(),
+          },
+        },
         { type: "json_object" },
         null,
       ];
       let lastError;
       for (let i = 0; i < formats.length; i++) {
-        const body = formats[i] ? { ...base, response_format: formats[i] } : { ...base };
+        const body = formats[i]
+          ? { ...base, response_format: formats[i] }
+          : { ...base };
         try {
           return await ai.post(body, apiKey);
         } catch (e) {
-          const rejectsFormat = e?.status === 400 && /response_format|json[_ ]?schema|json/i.test(e.message || "");
+          const rejectsFormat =
+            e?.status === 400 &&
+            /response_format|json[_ ]?schema|json/i.test(e.message || "");
           if (rejectsFormat && i < formats.length - 1) {
             const next = formats[i + 1];
-            Log.ai.warn(`Model "${model}" rejected response_format=${formats[i].type} (HTTP 400); retrying with ${next ? next.type : "no response_format"}.`);
+            Log.ai.warn(
+              `Model "${model}" rejected response_format=${formats[i].type} (HTTP 400); retrying with ${next ? next.type : "no response_format"}.`,
+            );
             lastError = e;
             continue;
           }
@@ -495,7 +585,9 @@ Now output only the JSON object.`;
     // POST to OpenRouter with a hard timeout so a hung request can never lock
     // the Tidy button indefinitely.
     async post(body, apiKey) {
-      Log.ai.debug(`Requesting completion from OpenRouter (model: ${body.model}, max_tokens: ${body.max_tokens}, timeout: ${CONFIG.api.timeoutMs}ms).`);
+      Log.ai.debug(
+        `Requesting completion from OpenRouter (model: ${body.model}, max_tokens: ${body.max_tokens}, timeout: ${CONFIG.api.timeoutMs}ms).`,
+      );
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), CONFIG.api.timeoutMs);
 
@@ -505,7 +597,7 @@ Now output only the JSON object.`;
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKey}`,
+            Authorization: `Bearer ${apiKey}`,
             "HTTP-Referer": CONFIG.api.referer,
             "X-Title": CONFIG.api.title,
           },
@@ -514,19 +606,33 @@ Now output only the JSON object.`;
         });
       } catch (e) {
         if (e?.name === "AbortError") {
-          Log.ai.error(`OpenRouter request aborted after exceeding the ${CONFIG.api.timeoutMs / 1000}s timeout (model: ${body.model}).`);
-          throw new Error(`OpenRouter request timed out after ${CONFIG.api.timeoutMs / 1000}s`);
+          Log.ai.error(
+            `OpenRouter request aborted after exceeding the ${CONFIG.api.timeoutMs / 1000}s timeout (model: ${body.model}).`,
+          );
+          throw new Error(
+            `OpenRouter request timed out after ${CONFIG.api.timeoutMs / 1000}s`,
+          );
         }
-        Log.ai.error(`Network error while contacting OpenRouter (endpoint: ${CONFIG.api.endpoint}).`, e);
+        Log.ai.error(
+          `Network error while contacting OpenRouter (endpoint: ${CONFIG.api.endpoint}).`,
+          e,
+        );
         throw e;
       } finally {
         clearTimeout(timer);
       }
 
-      Log.ai.debug(`OpenRouter responded with HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}.`);
+      Log.ai.debug(
+        `OpenRouter responded with HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}.`,
+      );
       if (!response.ok) {
-        const detail = (await response.text()).slice(0, CONFIG.api.errorBodyMaxChars);
-        Log.ai.error(`OpenRouter request failed with HTTP ${response.status}. Response body (truncated): ${detail}`);
+        const detail = (await response.text()).slice(
+          0,
+          CONFIG.api.errorBodyMaxChars,
+        );
+        Log.ai.error(
+          `OpenRouter request failed with HTTP ${response.status}. Response body (truncated): ${detail}`,
+        );
         const error = new Error(`OpenRouter ${response.status}: ${detail}`);
         error.status = response.status;
         throw error;
@@ -549,38 +655,49 @@ Now output only the JSON object.`;
       if (data.choices?.[0]?.finish_reason === "length") {
         Log.ai.error(
           "Model response was truncated (finish_reason: length).",
-          "model:", data.model,
-          "| usage:", JSON.stringify(data.usage)
+          "model:",
+          data.model,
+          "| usage:",
+          JSON.stringify(data.usage),
         );
         throw new Error(
           "Model response was truncated before completing the JSON (hit the " +
-          "output token limit). Try tidying fewer tabs or use a model with a " +
-          "larger output budget."
+            "output token limit). Try tidying fewer tabs or use a model with a " +
+            "larger output budget.",
         );
       }
 
       const message = data.choices?.[0]?.message;
       let content = message?.content;
       if (Array.isArray(content)) {
-        content = content.map((part) => part?.text || part?.content || "").join("");
+        content = content
+          .map((part) => part?.text || part?.content || "")
+          .join("");
       }
       content = (content || "").trim();
-      if (!content && message?.reasoning) content = String(message.reasoning).trim();
+      if (!content && message?.reasoning)
+        content = String(message.reasoning).trim();
 
       if (!content) {
         Log.ai.error(
           "Model returned an empty completion.",
-          "finish_reason:", data.choices?.[0]?.finish_reason,
-          "| model:", data.model,
-          "| usage:", JSON.stringify(data.usage)
+          "finish_reason:",
+          data.choices?.[0]?.finish_reason,
+          "| model:",
+          data.model,
+          "| usage:",
+          JSON.stringify(data.usage),
         );
         throw new Error(
           "Model returned empty content. Try a concrete instruct model " +
-          "(e.g. openai/gpt-4o-mini) instead of a free/reasoning router."
+            "(e.g. openai/gpt-4o-mini) instead of a free/reasoning router.",
         );
       }
       // Strip a stray ```json fence if the model wrapped its JSON.
-      return content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+      return content
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```$/, "")
+        .trim();
     },
 
     // Parse the model's text into validated [{name, tabs:[<tabEl>]}] groups,
@@ -594,10 +711,15 @@ Now output only the JSON object.`;
       try {
         parsed = JSON.parse(text);
       } catch {
-        Log.ai.debug("Completion was not strict JSON; extracting the first {…} block.");
+        Log.ai.debug(
+          "Completion was not strict JSON; extracting the first {…} block.",
+        );
         const match = text.match(/\{[\s\S]*\}/);
         if (!match) {
-          Log.ai.error("Could not extract any JSON object from the model output (truncated):", preview());
+          Log.ai.error(
+            "Could not extract any JSON object from the model output (truncated):",
+            preview(),
+          );
           throw new Error(`Could not parse model output: ${preview()}`);
         }
         parsed = JSON.parse(match[0]);
@@ -615,7 +737,8 @@ Now output only the JSON object.`;
             members.push(tab);
           }
         }
-        if (members.length) result.push({ name: group.name || "Group", tabs: members });
+        if (members.length)
+          result.push({ name: group.name || "Group", tabs: members });
       }
 
       // Enforce the single-tab budget: keep at most as many single-tab groups as
@@ -636,18 +759,24 @@ Now output only the JSON object.`;
         }
       }
       if (overflow.length) {
-        Log.ai.debug(`Single-tab budget exceeded; folding ${overflow.length} surplus singleton tab(s) into "Other".`);
+        Log.ai.debug(
+          `Single-tab budget exceeded; folding ${overflow.length} surplus singleton tab(s) into "Other".`,
+        );
       }
 
       const ungrouped = sourceTabs.filter((_, i) => !used.has(i));
       if (ungrouped.length) {
-        Log.ai.debug(`Model left ${ungrouped.length} tab(s) ungrouped; collecting them into "Other".`);
+        Log.ai.debug(
+          `Model left ${ungrouped.length} tab(s) ungrouped; collecting them into "Other".`,
+        );
       }
       const other = [...overflow, ...ungrouped];
       if (other.length) {
         kept.push({ name: "Other", tabs: other });
       }
-      Log.ai.debug(`Parsed model output into ${kept.length} group(s) covering ${used.size + ungrouped.length} tab(s).`);
+      Log.ai.debug(
+        `Parsed model output into ${kept.length} group(s) covering ${used.size + ungrouped.length} tab(s).`,
+      );
       return kept;
     },
   };
@@ -666,7 +795,10 @@ Now output only the JSON object.`;
           try {
             gBrowser.ungroupTab(tab);
           } catch (e) {
-            Log.groups.debug("Failed to detach a tab from its current group before regrouping:", e?.message);
+            Log.groups.debug(
+              "Failed to detach a tab from its current group before regrouping:",
+              e?.message,
+            );
           }
         }
       }
@@ -687,14 +819,21 @@ Now output only the JSON object.`;
             try {
               if (label) setGroupName(group, label);
               if (color) setGroupColor(group, color);
-            } catch { /* non-fatal */ }
+            } catch {
+              /* non-fatal */
+            }
           }
           return true;
         } catch (e) {
-          Log.groups.debug(`addTabGroup attempt failed for group "${label}":`, e?.message);
+          Log.groups.debug(
+            `addTabGroup attempt failed for group "${label}":`,
+            e?.message,
+          );
         }
       }
-      Log.groups.error(`Failed to create tab group "${label}" after ${attempts.length} attempts (${members.length} tab(s)).`);
+      Log.groups.error(
+        `Failed to create tab group "${label}" after ${attempts.length} attempts (${members.length} tab(s)).`,
+      );
       return false;
     },
 
@@ -703,7 +842,9 @@ Now output only the JSON object.`;
     // move, and abandoned groups dissolve. No nesting, minimal disruption.
     apply(plan) {
       if (typeof gBrowser.addTabGroup !== "function") {
-        throw new Error("gBrowser.addTabGroup is unavailable in this Zen build.");
+        throw new Error(
+          "gBrowser.addTabGroup is unavailable in this Zen build.",
+        );
       }
       groups.reconcile(plan, groups.existingFor(plan));
     },
@@ -739,8 +880,9 @@ Now output only the JSON object.`;
       let paletteIndex = 0;
       const nextColor = () => {
         let color;
-        do { color = palette[paletteIndex++ % palette.length]; }
-        while (usedColors.has(color) && paletteIndex <= palette.length);
+        do {
+          color = palette[paletteIndex++ % palette.length];
+        } while (usedColors.has(color) && paletteIndex <= palette.length);
         usedColors.add(color);
         return color;
       };
@@ -761,9 +903,14 @@ Now output only the JSON object.`;
       for (const group of plan) {
         const live = group.tabs.filter(tabs.isAlive);
         const dropped = group.tabs.length - live.length;
-        if (dropped) Log.groups.warn(`Group "${group.name}": ${dropped} tab(s) were closed during the tidy and will be skipped.`);
+        if (dropped)
+          Log.groups.warn(
+            `Group "${group.name}": ${dropped} tab(s) were closed during the tidy and will be skipped.`,
+          );
         if (!live.length) {
-          Log.groups.debug(`Group "${group.name}" has no live tabs after filtering; skipping.`);
+          Log.groups.debug(
+            `Group "${group.name}" has no live tabs after filtering; skipping.`,
+          );
           continue;
         }
 
@@ -773,13 +920,23 @@ Now output only the JSON object.`;
           usedColors.add(getGroupColor(el));
           const toAdd = live.filter((tab) => tab.group !== el);
           if (toAdd.length) {
-            Log.groups.debug(`Reusing existing group "${group.name}" in place; adding ${toAdd.length} tab(s).`);
-            try { el.addTabs(toAdd); }
-            catch (e) { Log.groups.warn(`Failed to add tabs to existing group "${group.name}".`, e); }
+            Log.groups.debug(
+              `Reusing existing group "${group.name}" in place; adding ${toAdd.length} tab(s).`,
+            );
+            try {
+              el.addTabs(toAdd);
+            } catch (e) {
+              Log.groups.warn(
+                `Failed to add tabs to existing group "${group.name}".`,
+                e,
+              );
+            }
           }
         } else {
           const color = nextColor();
-          Log.groups.debug(`Creating new group "${group.name}" with ${live.length} tab(s) (color: ${color}).`);
+          Log.groups.debug(
+            `Creating new group "${group.name}" with ${live.length} tab(s) (color: ${color}).`,
+          );
           groups.create(live, group.name, color);
         }
       }
@@ -796,17 +953,40 @@ Now output only the JSON object.`;
     // with the new ones. The detach + removal below (and the empty-group sweep)
     // finish the actual teardown.
     dissolve(el) {
-      try { el.label = ""; el.removeAttribute?.("label"); } catch { /* non-fatal */ }
+      try {
+        el.label = "";
+        el.removeAttribute?.("label");
+      } catch {
+        /* non-fatal */
+      }
 
       for (const tab of [...getGroupTabs(el)].filter(tabs.isAlive)) {
         if (typeof gBrowser.ungroupTab !== "function") break;
-        try { gBrowser.ungroupTab(tab); }
-        catch (e) { Log.groups.debug("Failed to detach a tab while dissolving an abandoned group:", e?.message); }
+        try {
+          gBrowser.ungroupTab(tab);
+        } catch (e) {
+          Log.groups.debug(
+            "Failed to detach a tab while dissolving an abandoned group:",
+            e?.message,
+          );
+        }
       }
       if (groups.hasLiveTabs(el)) return; // teardown deferred; the empty-group sweep finishes it
-      try { gBrowser.removeTabGroup?.(el); }
-      catch (e) { Log.groups.debug("removeTabGroup failed while dissolving an abandoned group:", e?.message); }
-      if (el.isConnected) { try { el.remove(); } catch { /* already detached */ } }
+      try {
+        gBrowser.removeTabGroup?.(el);
+      } catch (e) {
+        Log.groups.debug(
+          "removeTabGroup failed while dissolving an abandoned group:",
+          e?.message,
+        );
+      }
+      if (el.isConnected) {
+        try {
+          el.remove();
+        } catch {
+          /* already detached */
+        }
+      }
     },
 
     // Is a group element holding at least one tab that isn't closing?
@@ -828,15 +1008,26 @@ Now output only the JSON object.`;
         if (groupEl.querySelector?.(".zen-tidy-tabs-inline-editing")) continue;
         try {
           // The group is empty, so removing it never closes a live tab.
-          if (typeof gBrowser.removeTabGroup === "function") gBrowser.removeTabGroup(groupEl);
+          if (typeof gBrowser.removeTabGroup === "function")
+            gBrowser.removeTabGroup(groupEl);
           else groupEl.remove();
           removed++;
         } catch (e) {
-          try { groupEl.remove(); removed++; }
-          catch { Log.groups.warn("Could not remove an empty tab group via API or direct DOM removal.", e); }
+          try {
+            groupEl.remove();
+            removed++;
+          } catch {
+            Log.groups.warn(
+              "Could not remove an empty tab group via API or direct DOM removal.",
+              e,
+            );
+          }
         }
       }
-      if (removed) Log.groups.debug(`Removed ${removed} empty group(s) from the active workspace.`);
+      if (removed)
+        Log.groups.debug(
+          `Removed ${removed} empty group(s) from the active workspace.`,
+        );
       return removed;
     },
 
@@ -846,7 +1037,8 @@ Now output only the JSON object.`;
       let tries = 0;
       const tick = () => {
         groups.removeEmpty();
-        if (++tries < CONFIG.timing.emptyCheckMaxTries) setTimeout(tick, CONFIG.timing.emptyCheckIntervalMs);
+        if (++tries < CONFIG.timing.emptyCheckMaxTries)
+          setTimeout(tick, CONFIG.timing.emptyCheckIntervalMs);
       };
       setTimeout(tick, CONFIG.timing.emptyCheckDelayMs);
     },
@@ -860,10 +1052,16 @@ Now output only the JSON object.`;
       let pending = null;
       const observer = new MutationObserver(() => {
         if (pending) return;
-        pending = setTimeout(() => { pending = null; groups.removeEmpty(); }, CONFIG.timing.emptyWatcherDebounceMs);
+        pending = setTimeout(() => {
+          pending = null;
+          groups.removeEmpty();
+        }, CONFIG.timing.emptyWatcherDebounceMs);
       });
       observer.observe(root, { childList: true, subtree: true });
-      Log.groups.debug("Empty-group watcher installed on", `${dom.describe(root)}.`);
+      Log.groups.debug(
+        "Empty-group watcher installed on",
+        `${dom.describe(root)}.`,
+      );
     },
   };
 
@@ -890,7 +1088,11 @@ Now output only the JSON object.`;
       return input;
     },
     button(text, variant = "") {
-      return make.el("button", `zen-tidy-tabs-btn${variant ? ` ${variant}` : ""}`, text);
+      return make.el(
+        "button",
+        `zen-tidy-tabs-btn${variant ? ` ${variant}` : ""}`,
+        text,
+      );
     },
   };
 
@@ -924,7 +1126,9 @@ Now output only the JSON object.`;
       overlay.append(panel);
 
       // Click outside the panel, or Escape, closes the modal; Tab stays trapped.
-      overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) modal.close(); });
+      overlay.addEventListener("mousedown", (e) => {
+        if (e.target === overlay) modal.close();
+      });
       modal.keyHandler = (e) => {
         if (e.key === "Escape") modal.close();
         else if (e.key === "Tab") modal.trapFocus(e, panel);
@@ -939,9 +1143,11 @@ Now output only the JSON object.`;
     // Cycle focus among the panel's focusable elements instead of escaping to
     // the underlying chrome.
     trapFocus(e, panel) {
-      const focusable = [...panel.querySelectorAll(
-        "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"
-      )].filter((el) => !el.disabled && el.offsetParent !== null);
+      const focusable = [
+        ...panel.querySelectorAll(
+          "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
+        ),
+      ].filter((el) => !el.disabled && el.offsetParent !== null);
       if (!focusable.length) return;
 
       const first = focusable[0];
@@ -993,27 +1199,42 @@ Now output only the JSON object.`;
       const { body, footer } = modal.open("Zen Tidy Tabs Settings");
       Log.user.debug("Opened the settings modal.");
 
-      const key = make.input(prefs.apiKey(), { type: "password", placeholder: "sk-or-v1-..." });
-      const model = make.input(prefs.model(), { placeholder: CONFIG.api.defaultModel });
+      const key = make.input(prefs.apiKey(), {
+        type: "password",
+        placeholder: "sk-or-v1-...",
+      });
+      const model = make.input(prefs.model(), {
+        placeholder: CONFIG.api.defaultModel,
+      });
 
       const labelSegment = ui.segmentedControl(
-        [["filled", "Colored"], ["text", "Text only"]],
-        prefs.labelStyle()
+        [
+          ["filled", "Colored"],
+          ["text", "Text only"],
+        ],
+        prefs.labelStyle(),
       );
       const urlSegment = ui.segmentedControl(
-        [["detailed", "Detailed"], ["compact", "Compact"], ["minimal", "Minimal"]],
-        prefs.urlMode()
+        [
+          ["detailed", "Detailed"],
+          ["compact", "Compact"],
+          ["minimal", "Minimal"],
+        ],
+        prefs.urlMode(),
       );
       const urlHint = make.el(
-        "p", "zen-tidy-tabs-hint",
+        "p",
+        "zen-tidy-tabs-hint",
         "What each tab sends to the AI — Detailed: title + URL · Compact: title + domain · " +
-        "Minimal: title only. Query strings are never sent."
+          "Minimal: title only. Query strings are never sent.",
       );
 
       const keyHint = make.el("p", "zen-tidy-tabs-hint");
       keyHint.append(doc.createTextNode("Key is stored locally. Get one at "));
       const link = make.el("a", "zen-tidy-tabs-link", "openrouter.ai/keys");
-      link.addEventListener("click", () => win.openTrustedLinkIn?.("https://openrouter.ai/keys", "tab"));
+      link.addEventListener("click", () =>
+        win.openTrustedLinkIn?.("https://openrouter.ai/keys", "tab"),
+      );
       keyHint.append(link, doc.createTextNode("."));
 
       body.append(
@@ -1022,7 +1243,7 @@ Now output only the JSON object.`;
         make.field("Group labels", labelSegment.el),
         make.field("Tab info sent to AI", urlSegment.el),
         urlHint,
-        keyHint
+        keyHint,
       );
 
       const cancel = make.button("Cancel", "ghost");
@@ -1034,7 +1255,9 @@ Now output only the JSON object.`;
         prefs.set(CONFIG.prefs.model, model.value.trim());
         prefs.set(CONFIG.prefs.labelStyle, labelSegment.get());
         prefs.set(CONFIG.prefs.urlMode, urlSegment.get());
-        Log.user.info(`Settings saved (model: ${model.value.trim() || CONFIG.api.defaultModel}, labelStyle: ${labelSegment.get()}, urlMode: ${urlSegment.get()}, apiKey: ${key.value.trim() ? "set" : "empty"}).`);
+        Log.user.info(
+          `Settings saved (model: ${model.value.trim() || CONFIG.api.defaultModel}, labelStyle: ${labelSegment.get()}, urlMode: ${urlSegment.get()}, apiKey: ${key.value.trim() ? "set" : "empty"}).`,
+        );
         styles.inject(); // re-apply label appearance immediately
         modal.close();
         orchestrator.notify("Settings saved.");
@@ -1090,7 +1313,8 @@ Now output only the JSON object.`;
     // not count, so a workspace switch re-places it (CONTROL-7).
     twinIsCurrent() {
       const existing = doc.getElementById(CONFIG.ui.controlId);
-      if (!(existing?.dataset?.twin === "1" && existing.isConnected)) return false;
+      if (!(existing?.dataset?.twin === "1" && existing.isConnected))
+        return false;
       const clear = dom.clearControl();
       return (
         !!clear &&
@@ -1109,7 +1333,9 @@ Now output only the JSON object.`;
       if (!clear?.parentElement) return false;
       doc.getElementById(CONFIG.ui.controlId)?.remove();
       clear.parentElement.insertBefore(control.build(clear), clear);
-      Log.dom.info(`Tidy control mounted as a twin of the Clear button (${dom.describe(clear)}).`);
+      Log.dom.info(
+        `Tidy control mounted as a twin of the Clear button (${dom.describe(clear)}).`,
+      );
       return true;
     },
 
@@ -1122,8 +1348,15 @@ Now output only the JSON object.`;
       // Hover anywhere in the chrome: cheap because placeTwinIfClearPresent
       // early-returns once a twin exists.
       const target = doc.documentElement;
-      target.addEventListener("mouseover", () => control.placeTwinIfClearPresent(), true);
-      Log.dom.debug("Clear-button hover watcher installed on", `${dom.describe(target)}.`);
+      target.addEventListener(
+        "mouseover",
+        () => control.placeTwinIfClearPresent(),
+        true,
+      );
+      Log.dom.debug(
+        "Clear-button hover watcher installed on",
+        `${dom.describe(target)}.`,
+      );
     },
 
     // Zen renders one <zen-workspace> per workspace and swaps the [active] one
@@ -1138,7 +1371,9 @@ Now output only the JSON object.`;
       if (typeof zw?.addChangeListeners !== "function") return;
       win.__zenTidyTabsWorkspaceWatcher = true;
       zw.addChangeListeners(() => control.mount(), { once: false });
-      Log.dom.debug("Workspace-change watcher installed; Tidy control will follow the active workspace.");
+      Log.dom.debug(
+        "Workspace-change watcher installed; Tidy control will follow the active workspace.",
+      );
     },
 
     // Mount: twin beside Clear if present; else a hover-reveal fallback on the
@@ -1159,12 +1394,16 @@ Now output only the JSON object.`;
         const anchor = section && dom.firstNormalNode(section);
         if (anchor?.parentElement) {
           anchor.parentElement.insertBefore(control.build(null), anchor);
-          Log.dom.info("Tidy control mounted via separator fallback (hover to reveal; will upgrade to a Clear twin when one appears).");
+          Log.dom.info(
+            "Tidy control mounted via separator fallback (hover to reveal; will upgrade to a Clear twin when one appears).",
+          );
           return true;
         }
       }
 
-      Log.dom.debug("No mount target available yet; will retry or wait for a hover.");
+      Log.dom.debug(
+        "No mount target available yet; will retry or wait for a hover.",
+      );
       return !!doc.getElementById(CONFIG.ui.controlId);
     },
 
@@ -1225,8 +1464,11 @@ Now output only the JSON object.`;
     uninstall() {
       const prev = win.__zenTidyTabsPanelOverride;
       if (!prev) return;
-      try { prev.panel.removeEventListener("command", prev.onCommand, true); }
-      catch { /* panel already torn down */ }
+      try {
+        prev.panel.removeEventListener("command", prev.onCommand, true);
+      } catch {
+        /* panel already torn down */
+      }
       win.__zenTidyTabsPanelOverride = null;
     },
 
@@ -1237,18 +1479,27 @@ Now output only the JSON object.`;
       const name = getGroupName(group);
       const members = [...getGroupTabs(group)].filter(tabs.isAlive);
       for (const tab of members) {
-        try { gBrowser.ungroupTab(tab); }
-        catch (e) { Log.user.warn(`Failed to ungroup a tab from "${name}".`, e); }
+        try {
+          gBrowser.ungroupTab(tab);
+        } catch (e) {
+          Log.user.warn(`Failed to ungroup a tab from "${name}".`, e);
+        }
       }
       try {
-        if (!groups.hasLiveTabs(group) && typeof gBrowser.removeTabGroup === "function") {
+        if (
+          !groups.hasLiveTabs(group) &&
+          typeof gBrowser.removeTabGroup === "function"
+        ) {
           gBrowser.removeTabGroup(group);
         }
       } catch (e) {
         Log.user.debug("removeTabGroup after ungroup failed:", e?.message);
       }
-      try { gBrowser.tabGroupMenu?.close?.(); }
-      catch { /* panel may already be gone */ }
+      try {
+        gBrowser.tabGroupMenu?.close?.();
+      } catch {
+        /* panel may already be gone */
+      }
       Log.user.info(`Ungrouped ${members.length} tab(s) from "${name}".`);
     },
   };
@@ -1304,7 +1555,9 @@ Now output only the JSON object.`;
       const onContextMenu = (e) => {
         // Match the inline input too, so a right click mid-rename still opens the
         // panel rather than landing on the (hidden) label.
-        const hit = e.target?.closest?.(".tab-group-label, .zen-tidy-tabs-inline-input");
+        const hit = e.target?.closest?.(
+          ".tab-group-label, .zen-tidy-tabs-inline-input",
+        );
         if (!hit) return;
         const group = hit.closest("tab-group");
         if (!group) return;
@@ -1322,7 +1575,10 @@ Now output only the JSON object.`;
             // now the native panel is up.
             nativePanel.customize();
           } catch (err) {
-            Log.user.error("Failed to open Zen's native group edit panel.", err);
+            Log.user.error(
+              "Failed to open Zen's native group edit panel.",
+              err,
+            );
           }
         }, 0);
       };
@@ -1356,10 +1612,23 @@ Now output only the JSON object.`;
       // Read while the label is still rendered, then hand its spot to the input.
       const cs = getComputedStyle(labelEl);
       const inherited = [
-        "fontFamily", "fontSize", "fontWeight", "fontStyle", "letterSpacing",
-        "lineHeight", "color", "backgroundColor", "backgroundImage",
-        "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
-        "borderRadius", "height", "textAlign", "textShadow",
+        "fontFamily",
+        "fontSize",
+        "fontWeight",
+        "fontStyle",
+        "letterSpacing",
+        "lineHeight",
+        "color",
+        "backgroundColor",
+        "backgroundImage",
+        "paddingTop",
+        "paddingRight",
+        "paddingBottom",
+        "paddingLeft",
+        "borderRadius",
+        "height",
+        "textAlign",
+        "textShadow",
       ];
       for (const prop of inherited) input.style[prop] = cs[prop];
       // Size to the text, not the badge's slot: the label can be stretched by
@@ -1372,7 +1641,13 @@ Now output only the JSON object.`;
       measure.style.visibility = "hidden";
       measure.style.whiteSpace = "pre";
       measure.style.pointerEvents = "none";
-      for (const prop of ["fontFamily", "fontSize", "fontWeight", "fontStyle", "letterSpacing"]) {
+      for (const prop of [
+        "fontFamily",
+        "fontSize",
+        "fontWeight",
+        "fontStyle",
+        "letterSpacing",
+      ]) {
         measure.style[prop] = cs[prop];
       }
       const sizeToText = () => {
@@ -1406,14 +1681,22 @@ Now output only the JSON object.`;
             setGroupName(group, name);
             Log.user.info(`Renamed group "${original}" to "${name}".`);
           } catch (e) {
-            Log.user.error(`Failed to rename group "${original}" to "${name}".`, e);
+            Log.user.error(
+              `Failed to rename group "${original}" to "${name}".`,
+              e,
+            );
           }
         }
       };
 
       const onKey = (e) => {
-        if (e.key === "Enter") { e.preventDefault(); finish(true); }
-        else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+        if (e.key === "Enter") {
+          e.preventDefault();
+          finish(true);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          finish(false);
+        }
         e.stopPropagation();
       };
       const onBlur = () => finish(true);
@@ -1631,7 +1914,9 @@ Now output only the JSON object.`;
         ${styles.labelStyleCss()}
       `;
       (doc.head || doc.documentElement).appendChild(style);
-      Log.styles.debug(`Stylesheet injected (#${CONFIG.ui.styleId}, labelStyle: ${prefs.labelStyle()}).`);
+      Log.styles.debug(
+        `Stylesheet injected (#${CONFIG.ui.styleId}, labelStyle: ${prefs.labelStyle()}).`,
+      );
     },
   };
 
@@ -1649,15 +1934,20 @@ Now output only the JSON object.`;
           CONFIG.ui.notificationValue,
           {
             label: `Zen Tidy Tabs: ${message}`,
-            priority: isError ? box.PRIORITY_WARNING_HIGH : box.PRIORITY_INFO_LOW,
+            priority: isError
+              ? box.PRIORITY_WARNING_HIGH
+              : box.PRIORITY_INFO_LOW,
           },
-          []
+          [],
         );
         // Auto-dismiss only this specific notification element, so a stale
         // timer can never remove a later notification. (TIDY-14)
         Promise.resolve(appended).then((note) => {
           if (!note) return;
-          setTimeout(() => box.removeNotification(note), CONFIG.timing.notifyDurationMs);
+          setTimeout(
+            () => box.removeNotification(note),
+            CONFIG.timing.notifyDurationMs,
+          );
         });
       } catch {
         /* notification box unavailable — the console log above already fired */
@@ -1666,37 +1956,60 @@ Now output only the JSON object.`;
 
     async runTidy() {
       if (orchestrator.running) {
-        Log.tidy.debug("Ignoring Tidy request: a tidy run is already in progress.");
+        Log.tidy.debug(
+          "Ignoring Tidy request: a tidy run is already in progress.",
+        );
         return;
       }
 
       const apiKey = prefs.apiKey();
       if (!apiKey) {
         Log.tidy.warn("Tidy aborted: no OpenRouter API key configured.");
-        orchestrator.notify(`Set your key in about:config → ${CONFIG.prefs.apiKey}`, true);
+        orchestrator.notify(
+          `Set your key in about:config → ${CONFIG.prefs.apiKey}`,
+          true,
+        );
         return;
       }
 
       // Re-tidy considers the entire workspace, not just new tabs.
       const sourceTabs = tabs.collect(true);
       if (sourceTabs.length < CONFIG.grouping.minTabs) {
-        Log.tidy.warn(`Tidy aborted: only ${sourceTabs.length} eligible tab(s), need at least ${CONFIG.grouping.minTabs}.`);
-        orchestrator.notify(`Need at least ${CONFIG.grouping.minTabs} tabs to tidy.`, true);
+        Log.tidy.warn(
+          `Tidy aborted: only ${sourceTabs.length} eligible tab(s), need at least ${CONFIG.grouping.minTabs}.`,
+        );
+        orchestrator.notify(
+          `Need at least ${CONFIG.grouping.minTabs} tabs to tidy.`,
+          true,
+        );
         return;
       }
 
       orchestrator.running = true;
       control.setBusy(true);
       try {
-        Log.tidy.info(`Starting tidy of ${sourceTabs.length} tab(s) (model: ${prefs.model()}, urlMode: ${prefs.urlMode()}).`);
-        const response = await ai.request(tabs.snapshot(sourceTabs), apiKey, prefs.model());
+        Log.tidy.info(
+          `Starting tidy of ${sourceTabs.length} tab(s) (model: ${prefs.model()}, urlMode: ${prefs.urlMode()}).`,
+        );
+        const response = await ai.request(
+          tabs.snapshot(sourceTabs),
+          apiKey,
+          prefs.model(),
+        );
         const plan = ai.parseGroups(ai.extractText(response), sourceTabs);
-        Log.tidy.info("Grouping plan:", plan.map((g) => `${g.name}(${g.tabs.length})`).join(", "));
+        Log.tidy.info(
+          "Grouping plan:",
+          plan.map((g) => `${g.name}(${g.tabs.length})`).join(", "),
+        );
 
         groups.apply(plan);
         groups.scheduleEmptyCheck();
-        Log.tidy.info(`Tidy complete: sorted ${sourceTabs.length} tab(s) into ${plan.length} group(s).`);
-        orchestrator.notify(`Sorted ${sourceTabs.length} tabs into ${plan.length} groups.`);
+        Log.tidy.info(
+          `Tidy complete: sorted ${sourceTabs.length} tab(s) into ${plan.length} group(s).`,
+        );
+        orchestrator.notify(
+          `Sorted ${sourceTabs.length} tabs into ${plan.length} groups.`,
+        );
       } catch (e) {
         Log.tidy.error("Tidy run failed.", e);
         orchestrator.notify(`failed: ${e.message || e}`, true);
@@ -1713,7 +2026,11 @@ Now output only the JSON object.`;
   // ============================================================================
   const diag = {
     pseudo(el, which) {
-      try { return getComputedStyle(el, which).content || ""; } catch { return ""; }
+      try {
+        return getComputedStyle(el, which).content || "";
+      } catch {
+        return "";
+      }
     },
 
     path(el, depth = 8) {
@@ -1729,12 +2046,15 @@ Now output only the JSON object.`;
     // Every element whose text / label / tooltip / pseudo says "clear".
     clearCandidates() {
       const hits = [];
-      const selector = "toolbarbutton, button, label, span, hbox, vbox, toolbaritem, div, image, [label], [tooltiptext]";
+      const selector =
+        "toolbarbutton, button, label, span, hbox, vbox, toolbaritem, div, image, [label], [tooltiptext]";
       for (const el of doc.querySelectorAll(selector)) {
         const text = (el.textContent || "").trim();
         const label = el.getAttribute?.("label") || "";
         const tip = el.getAttribute?.("tooltiptext") || "";
-        const pseudo = el.children.length ? "" : diag.pseudo(el, "::before") + diag.pseudo(el, "::after");
+        const pseudo = el.children.length
+          ? ""
+          : diag.pseudo(el, "::before") + diag.pseudo(el, "::after");
         if (/clear/i.test(`${text} ${label} ${tip} ${pseudo}`)) {
           hits.push({ el, text, label, tip, pseudo });
         }
@@ -1745,9 +2065,13 @@ Now output only the JSON object.`;
     newTabButton() {
       return (
         doc.getElementById("tabs-newtab-button") ||
-        doc.querySelector("[command='cmd_newNavigatorTab'], .tabs-newtab-button, #vertical-tabs-newtab-button") ||
+        doc.querySelector(
+          "[command='cmd_newNavigatorTab'], .tabs-newtab-button, #vertical-tabs-newtab-button",
+        ) ||
         [...doc.querySelectorAll("toolbarbutton, button")].find((b) =>
-          /new tab/i.test(`${b.getAttribute("label") || ""} ${b.textContent || ""}`)
+          /new tab/i.test(
+            `${b.getAttribute("label") || ""} ${b.textContent || ""}`,
+          ),
         ) ||
         null
       );
@@ -1763,25 +2087,44 @@ Now output only the JSON object.`;
       const section = dom.activeSection();
       Log.diagnose.info("activeSection:", dom.describe(section));
       if (section) {
-        Log.diagnose.info("  children:", [...section.children].map((c) => dom.describe(c)).join("  |  "));
+        Log.diagnose.info(
+          "  children:",
+          [...section.children].map((c) => dom.describe(c)).join("  |  "),
+        );
       }
-      Log.diagnose.info("firstNormalNode:", section ? dom.describe(dom.firstNormalNode(section)) : "n/a");
+      Log.diagnose.info(
+        "firstNormalNode:",
+        section ? dom.describe(dom.firstNormalNode(section)) : "n/a",
+      );
 
-      Log.diagnose.info("clearControl() result:", dom.describe(dom.clearControl()));
+      Log.diagnose.info(
+        "clearControl() result:",
+        dom.describe(dom.clearControl()),
+      );
 
       const hits = diag.clearCandidates();
       Log.diagnose.info("'clear' candidates found:", hits.length);
       hits.slice(0, 12).forEach((hit, i) => {
         Log.diagnose.info(`  [${i}] ${dom.describe(hit.el)}`);
-        Log.diagnose.info(`       text="${hit.text.slice(0, 24)}" label="${hit.label}" tip="${hit.tip}" pseudo=${JSON.stringify(hit.pseudo).slice(0, 40)}`);
+        Log.diagnose.info(
+          `       text="${hit.text.slice(0, 24)}" label="${hit.label}" tip="${hit.tip}" pseudo=${JSON.stringify(hit.pseudo).slice(0, 40)}`,
+        );
         Log.diagnose.info(`       path: ${diag.path(hit.el, 6)}`);
       });
 
       const newTab = diag.newTabButton();
       Log.diagnose.info("newTab button:", dom.describe(newTab));
       if (newTab?.parentElement) {
-        Log.diagnose.info("  newTab siblings:", [...newTab.parentElement.children].map((c) => dom.describe(c)).join("  |  "));
-        Log.diagnose.info("  newTab parent path:", diag.path(newTab.parentElement, 6));
+        Log.diagnose.info(
+          "  newTab siblings:",
+          [...newTab.parentElement.children]
+            .map((c) => dom.describe(c))
+            .join("  |  "),
+        );
+        Log.diagnose.info(
+          "  newTab parent path:",
+          diag.path(newTab.parentElement, 6),
+        );
       }
 
       Log.diagnose.info("================ END DIAGNOSIS =================");
@@ -1794,8 +2137,19 @@ Now output only the JSON object.`;
   // ============================================================================
   const init = () => {
     Log.init.info("Loading Zen Tidy Tabs…");
-    Log.init.debug("location:", (() => { try { return location.href; } catch { return "?"; } })());
-    Log.init.debug(`Environment: gBrowser.addTabGroup is ${typeof gBrowser.addTabGroup}, ${gBrowser.tabs.length} tab(s) open.`);
+    Log.init.debug(
+      "location:",
+      (() => {
+        try {
+          return location.href;
+        } catch {
+          return "?";
+        }
+      })(),
+    );
+    Log.init.debug(
+      `Environment: gBrowser.addTabGroup is ${typeof gBrowser.addTabGroup}, ${gBrowser.tabs.length} tab(s) open.`,
+    );
 
     styles.inject();
     editor.install();
@@ -1808,7 +2162,9 @@ Now output only the JSON object.`;
         if (control.mount() || ++attempts > CONFIG.timing.mountMaxAttempts) {
           clearInterval(timer);
           if (!doc.getElementById(CONFIG.ui.controlId)) {
-            Log.dom.warn(`Tidy control not placed after ${attempts} attempt(s); it will appear when you hover the tab separator.`);
+            Log.dom.warn(
+              `Tidy control not placed after ${attempts} attempt(s); it will appear when you hover the tab separator.`,
+            );
           }
         }
       }, CONFIG.timing.mountRetryMs);
@@ -1823,7 +2179,9 @@ Now output only the JSON object.`;
       injectStyles: () => styles.inject(),
       collect: (grouped = true) => tabs.collect(grouped),
     };
-    Log.init.info("Ready — left-click the Tidy control to organize tabs; right-click it for settings.");
+    Log.init.info(
+      "Ready — left-click the Tidy control to organize tabs; right-click it for settings.",
+    );
   };
 
   init();
