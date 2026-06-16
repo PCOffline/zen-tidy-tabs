@@ -46,8 +46,11 @@
     ui: {
       controlId: "zen-tidy-tabs-button",
       styleId: "zen-tidy-tabs-style",
+      overlayId: "zen-tidy-tabs-overlay",       // SETTINGS-1: spec-locked literal
+      notificationValue: "zen-tidy-tabs-msg",   // TIDY-14: spec-locked literal
       label: "🧹 Tidy",
       busyLabel: "↻ Tidying…",
+      tooltip: "Tidy tabs with AI",
       // Zen's own class on the native "Clear" control. The twin copies Clear's
       // classes for its look, but must NOT keep this one (CONTROL-6): Zen's
       // bookkeeping does a first-match querySelector for it, and a twin carrying
@@ -895,7 +898,7 @@
       modal.close();
 
       const overlay = make.el("div", "zen-tidy-tabs-overlay");
-      overlay.id = "zen-tidy-tabs-overlay";
+      overlay.id = CONFIG.ui.overlayId;
 
       const panel = make.el("div", "zen-tidy-tabs-modal");
       panel.setAttribute("role", "dialog");
@@ -952,7 +955,7 @@
         doc.removeEventListener("keydown", modal.keyHandler, true);
         modal.keyHandler = null;
       }
-      doc.getElementById("zen-tidy-tabs-overlay")?.remove();
+      doc.getElementById(CONFIG.ui.overlayId)?.remove();
     },
   };
 
@@ -1046,8 +1049,8 @@
       el.id = CONFIG.ui.controlId;
       el.textContent = CONFIG.ui.label;
       el.setAttribute("label", CONFIG.ui.label);
-      el.setAttribute("tooltiptext", "Tidy tabs with AI");
-      el.title = "Tidy tabs with AI";
+      el.setAttribute("tooltiptext", CONFIG.ui.tooltip);
+      el.title = CONFIG.ui.tooltip;
       el.className = twin ? twin.className : "zen-tidy-tabs-fallback";
       if (twin) {
         // Keep Clear's look, but never its control class: Zen's own first-match
@@ -1568,7 +1571,7 @@
           background: ${t.elevated};
           border: 1px solid ${t.border}; border-radius: 9px;
         }
-        .zen-tidy-tabs-input:focus-within, .zen-tidy-tabs-input:focus {
+        .zen-tidy-tabs-input:focus {
           border-color: ${t.accent};
         }
 
@@ -1596,8 +1599,6 @@
         .zen-tidy-tabs-btn:hover { filter: brightness(1.12); }
         .zen-tidy-tabs-btn.primary { background: ${t.accent}; border-color: transparent; color: #fff; }
         .zen-tidy-tabs-btn.ghost { background: transparent; }
-        .zen-tidy-tabs-btn.danger { background: transparent; border-color: transparent; color: #e26d6d; }
-        .zen-tidy-tabs-btn.danger:hover { background: rgba(226,109,109,.14); filter: none; }
 
         /* ---- Inline group rename ---- */
         /* startInline() copies the badge's own font, color, background, padding
@@ -1637,7 +1638,7 @@
       try {
         const box = gBrowser.getNotificationBox();
         const appended = box.appendNotification(
-          "zen-tidy-tabs-msg",
+          CONFIG.ui.notificationValue,
           {
             label: "Zen Tidy Tabs: " + message,
             priority: isError ? box.PRIORITY_WARNING_HIGH : box.PRIORITY_INFO_LOW,
