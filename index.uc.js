@@ -1290,10 +1290,31 @@ Now output only the JSON object.`;
 
       const keyHint = make.el("p", "zen-tidy-tabs-hint");
       keyHint.append(doc.createTextNode("Key is stored locally. Get one at "));
+      const keysUrl = "https://openrouter.ai/keys";
       const link = make.el("a", "zen-tidy-tabs-link", "openrouter.ai/keys");
-      link.addEventListener("click", () =>
-        win.openTrustedLinkIn?.("https://openrouter.ai/keys", "tab"),
-      );
+      // A real href makes the anchor focusable and reachable by the modal's
+      // focus trap (it selects `[href]`); the handlers below open the page in a
+      // tab instead of navigating the chrome document itself.
+      link.href = keysUrl;
+      const openKeysPage = (e) => {
+        e?.preventDefault();
+        modal.close();
+        if (typeof win.openTrustedLinkIn === "function") {
+          win.openTrustedLinkIn(keysUrl, "tab");
+        } else if (typeof gBrowser.addTrustedTab === "function") {
+          gBrowser.selectedTab = gBrowser.addTrustedTab(keysUrl);
+        } else {
+          Log.user.error(
+            `Could not open ${keysUrl}: no trusted-link API is available in this build.`,
+          );
+        }
+      };
+      // Click covers mouse and Enter (anchors fire a click on Enter); Space needs
+      // an explicit handler since it doesn't activate a link natively.
+      link.addEventListener("click", openKeysPage);
+      link.addEventListener("keydown", (e) => {
+        if (e.key === " ") openKeysPage(e);
+      });
       keyHint.append(link, doc.createTextNode("."));
 
       body.append(

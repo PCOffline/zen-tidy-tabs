@@ -133,5 +133,11 @@ declare global {
     __zenTidyReTidyWatch?: ReTidyWatchState;
     /** Original `gBrowser.addTabGroup`, stashed by a spec that stubs creation. */
     __zenTidyTabsOrigAddTabGroup?: GBrowser["addTabGroup"];
+    /** Opens a trusted link; stubbed by the settings key-link spec. */
+    openTrustedLinkIn?: (url: string, where: string) => void;
+    /** Original `openTrustedLinkIn`, stashed by the settings key-link spec. */
+    __zenTidyTabsOrigOpenLink?: Window["openTrustedLinkIn"];
+    /** URL recorded by the stubbed `openTrustedLinkIn` in the key-link spec. */
+    __zenTidyTabsOpenedLink?: string | null;
   }
 }

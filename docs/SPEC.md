@@ -334,6 +334,14 @@ in-place HTML input the script swaps in for the badge.
 - **SETTINGS-4** — Reopening the modal reflects the currently-saved values.
   _Verified by: `settings.spec.ts › saved settings persist and are reflected when reopened`._
 
+- **SETTINGS-5** — **The key-help link is a real, keyboard-operable control.** The
+  `openrouter.ai/keys` link has an `href`, so it is focusable and reachable by Tab through
+  the modal's focus trap. Activating it (mouse, Enter, or Space) opens OpenRouter's keys
+  page in a new tab — via `openTrustedLinkIn`, falling back to a trusted tab — and **closes
+  the settings modal**. It never navigates the chrome document itself and never silently
+  no-ops when a navigation API is missing.
+  _Verified by: `settings.spec.ts › the key-help link is keyboard-reachable and opens the keys page`._
+
 ---
 
 ## 6. Preferences (about:config)
