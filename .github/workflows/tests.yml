@@ -152,11 +152,11 @@ jobs:
 
       - name: Run E2E tests (Linux, headed under Xvfb)
         if: runner.os == 'Linux'
-        run: xvfb-run -a --server-args="-screen 0 1280x1024x24" npm test
+        run: xvfb-run -a --server-args="-screen 0 1280x1024x24" npm run test:headful
 
       - name: Run E2E tests (macOS / Windows, headed)
         if: runner.os != 'Linux'
-        run: npm test
+        run: npm run test:headful
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}

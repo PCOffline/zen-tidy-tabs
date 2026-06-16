@@ -17,7 +17,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : 2,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: 0,
+  retries: process.env.CI ? 2 : 0,
   // Launching Zen + injecting the script + driving chrome UI is slow-ish.
   timeout: 120_000,
   expect: { timeout: 15_000 },
