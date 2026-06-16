@@ -4,16 +4,20 @@ on:
   push:
     branches: [main]
     paths:
+      - "index.uc.js"
       - "tests/**"
       - "package.json"
       - "package-lock.json"
+      - "biome.json"
       - ".github/workflows/quality.yml"
   pull_request:
     branches: [main]
     paths:
+      - "index.uc.js"
       - "tests/**"
       - "package.json"
       - "package-lock.json"
+      - "biome.json"
       - ".github/workflows/quality.yml"
 
 permissions:
@@ -44,6 +48,9 @@ jobs:
 
       - name: Lint (Biome)
         run: npm run lint
+
+      - name: Lint product script (Biome)
+        run: npm run lint:script
 
       - name: Type-check (tsc)
         run: npm run typecheck

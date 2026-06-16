@@ -240,8 +240,8 @@
     describe(el) {
       if (!el) return "null";
       return (el.tagName || "?").toLowerCase() +
-        (el.id ? "#" + el.id : "") +
-        (el.className ? "." + String(el.className).trim().split(/\s+/)[0] : "");
+        (el.id ? `#${el.id}` : "") +
+        (el.className ? `.${String(el.className).trim().split(/\s+/)[0]}` : "");
     },
   };
 
@@ -505,7 +505,7 @@ Now output only the JSON object.`;
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": "Bearer " + apiKey,
+            "Authorization": `Bearer ${apiKey}`,
             "HTTP-Referer": CONFIG.api.referer,
             "X-Title": CONFIG.api.title,
           },
@@ -523,7 +523,7 @@ Now output only the JSON object.`;
         clearTimeout(timer);
       }
 
-      Log.ai.debug(`OpenRouter responded with HTTP ${response.status}${response.statusText ? " " + response.statusText : ""}.`);
+      Log.ai.debug(`OpenRouter responded with HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}.`);
       if (!response.ok) {
         const detail = (await response.text()).slice(0, CONFIG.api.errorBodyMaxChars);
         Log.ai.error(`OpenRouter request failed with HTTP ${response.status}. Response body (truncated): ${detail}`);
@@ -540,7 +540,7 @@ Now output only the JSON object.`;
       if (data.error) {
         const detail = data.error.message || JSON.stringify(data.error);
         Log.ai.error("OpenRouter returned an error payload:", detail);
-        throw new Error("API error: " + detail);
+        throw new Error(`API error: ${detail}`);
       }
 
       // A reply cut off by the output token limit leaves partial, unparseable
@@ -598,7 +598,7 @@ Now output only the JSON object.`;
         const match = text.match(/\{[\s\S]*\}/);
         if (!match) {
           Log.ai.error("Could not extract any JSON object from the model output (truncated):", preview());
-          throw new Error("Could not parse model output: " + preview());
+          throw new Error(`Could not parse model output: ${preview()}`);
         }
         parsed = JSON.parse(match[0]);
       }
@@ -863,7 +863,7 @@ Now output only the JSON object.`;
         pending = setTimeout(() => { pending = null; groups.removeEmpty(); }, CONFIG.timing.emptyWatcherDebounceMs);
       });
       observer.observe(root, { childList: true, subtree: true });
-      Log.groups.debug("Empty-group watcher installed on", dom.describe(root) + ".");
+      Log.groups.debug("Empty-group watcher installed on", `${dom.describe(root)}.`);
     },
   };
 
@@ -890,7 +890,7 @@ Now output only the JSON object.`;
       return input;
     },
     button(text, variant = "") {
-      return make.el("button", "zen-tidy-tabs-btn" + (variant ? " " + variant : ""), text);
+      return make.el("button", `zen-tidy-tabs-btn${variant ? ` ${variant}` : ""}`, text);
     },
   };
 
@@ -978,7 +978,9 @@ Now output only the JSON object.`;
         if (optionValue === current) button.classList.add("active");
         button.addEventListener("click", () => {
           value = optionValue;
-          segment.querySelectorAll(".zen-tidy-tabs-seg").forEach((s) => s.classList.remove("active"));
+          for (const s of segment.querySelectorAll(".zen-tidy-tabs-seg")) {
+            s.classList.remove("active");
+          }
           button.classList.add("active");
         });
         segment.append(button);
@@ -1107,7 +1109,7 @@ Now output only the JSON object.`;
       if (!clear?.parentElement) return false;
       doc.getElementById(CONFIG.ui.controlId)?.remove();
       clear.parentElement.insertBefore(control.build(clear), clear);
-      Log.dom.info("Tidy control mounted as a twin of the Clear button (" + dom.describe(clear) + ").");
+      Log.dom.info(`Tidy control mounted as a twin of the Clear button (${dom.describe(clear)}).`);
       return true;
     },
 
@@ -1121,7 +1123,7 @@ Now output only the JSON object.`;
       // early-returns once a twin exists.
       const target = doc.documentElement;
       target.addEventListener("mouseover", () => control.placeTwinIfClearPresent(), true);
-      Log.dom.debug("Clear-button hover watcher installed on", dom.describe(target) + ".");
+      Log.dom.debug("Clear-button hover watcher installed on", `${dom.describe(target)}.`);
     },
 
     // Zen renders one <zen-workspace> per workspace and swaps the [active] one
@@ -1646,7 +1648,7 @@ Now output only the JSON object.`;
         const appended = box.appendNotification(
           CONFIG.ui.notificationValue,
           {
-            label: "Zen Tidy Tabs: " + message,
+            label: `Zen Tidy Tabs: ${message}`,
             priority: isError ? box.PRIORITY_WARNING_HIGH : box.PRIORITY_INFO_LOW,
           },
           []
@@ -1671,7 +1673,7 @@ Now output only the JSON object.`;
       const apiKey = prefs.apiKey();
       if (!apiKey) {
         Log.tidy.warn("Tidy aborted: no OpenRouter API key configured.");
-        orchestrator.notify("Set your key in about:config → " + CONFIG.prefs.apiKey, true);
+        orchestrator.notify(`Set your key in about:config → ${CONFIG.prefs.apiKey}`, true);
         return;
       }
 
@@ -1697,7 +1699,7 @@ Now output only the JSON object.`;
         orchestrator.notify(`Sorted ${sourceTabs.length} tabs into ${plan.length} groups.`);
       } catch (e) {
         Log.tidy.error("Tidy run failed.", e);
-        orchestrator.notify("failed: " + (e.message || e), true);
+        orchestrator.notify(`failed: ${e.message || e}`, true);
       } finally {
         orchestrator.running = false;
         control.setBusy(false);
@@ -1745,7 +1747,7 @@ Now output only the JSON object.`;
         doc.getElementById("tabs-newtab-button") ||
         doc.querySelector("[command='cmd_newNavigatorTab'], .tabs-newtab-button, #vertical-tabs-newtab-button") ||
         [...doc.querySelectorAll("toolbarbutton, button")].find((b) =>
-          /new tab/i.test((b.getAttribute("label") || "") + " " + (b.textContent || ""))
+          /new tab/i.test(`${b.getAttribute("label") || ""} ${b.textContent || ""}`)
         ) ||
         null
       );
