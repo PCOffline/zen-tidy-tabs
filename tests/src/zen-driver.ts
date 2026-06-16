@@ -1748,7 +1748,18 @@ export class ZenDriver {
     grouping: GroupingPlan,
     opts: { defer?: boolean } = {},
   ): Promise<void> {
-    const content = JSON.stringify(grouping);
+    await this.installFetchRawStub(JSON.stringify(grouping), opts);
+  }
+
+  /**
+   * Like {@link installFetchStub} but the assistant message content is the exact
+   * string given, so a test can feed deliberately malformed (but HTTP-200)
+   * model output — e.g. a non-string group name or string/number indices.
+   */
+  async installFetchRawStub(
+    content: string,
+    opts: { defer?: boolean } = {},
+  ): Promise<void> {
     const payload = JSON.stringify({
       id: "zen-tidy-tabs-stub",
       model: "zen-tidy-tabs-stub",

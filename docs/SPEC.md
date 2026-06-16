@@ -207,6 +207,15 @@ in-place HTML input the script swaps in for the badge.
   predictably (the palette is reused in order) rather than failing.
   _Verified by: `tidying.spec.ts › a re-tidy never gives a new group a kept group's colour`._
 
+- **TIDY-20** — **Robust to malformed model output.** Plan parsing treats the model reply as
+  untrusted: a single malformed group entry degrades gracefully (at worst that group is
+  dropped) and never aborts the run. A group `name` that is not a string is coerced to one,
+  defaulting to `"Group"` when empty. A tab index is accepted only when it normalises to an
+  integer within range (`0 ≤ index < tab count`); a string index (`"2"`) and the same
+  numeric index (`2`) collapse to one, so each tab is still used at most once (TIDY-8), and
+  non-integer, negative, or out-of-range indices are dropped.
+  _Verified by: `tidying.spec.ts › tidies despite a non-string group name and duplicate string/number indices`._
+
 ---
 
 ## 3. Group badge — inline rename (left-click)
