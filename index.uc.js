@@ -177,7 +177,10 @@
   // the tabs may live on `.tabs` or only be queryable.
   // ============================================================================
   const TAB_SELECTOR = "tab, .tabbrowser-tab";
-  const normalizeName = (name) => (name || "").trim().toLowerCase();
+  const normalizeName = (name) =>
+    String(name ?? "")
+      .trim()
+      .toLowerCase();
   const getGroupName = (el) =>
     (el?.label || el?.getAttribute?.("label") || "").trim();
   const getGroupColor = (el) => el?.color || el?.getAttribute?.("color") || "";
@@ -739,15 +742,24 @@ Now output only the JSON object.`;
       const groupList = Array.isArray(parsed?.groups) ? parsed.groups : [];
       for (const group of groupList) {
         const members = [];
-        for (const index of Array.isArray(group?.tabs) ? group.tabs : []) {
-          const tab = sourceTabs[index];
-          if (tab && !used.has(index)) {
-            used.add(index);
-            members.push(tab);
-          }
+        for (const raw of Array.isArray(group?.tabs) ? group.tabs : []) {
+          const index = typeof raw === "string" ? Number(raw) : raw;
+          if (
+            typeof index !== "number" ||
+            !Number.isInteger(index) ||
+            index < 0 ||
+            index >= sourceTabs.length ||
+            used.has(index)
+          )
+            continue;
+          used.add(index);
+          members.push(sourceTabs[index]);
         }
         if (members.length)
-          result.push({ name: group.name || "Group", tabs: members });
+          result.push({
+            name: String(group?.name ?? "").trim() || "Group",
+            tabs: members,
+          });
       }
 
       // Enforce the single-tab budget: keep at most as many single-tab groups as

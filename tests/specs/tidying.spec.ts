@@ -345,4 +345,52 @@ test.describe("Tidying", () => {
       "a new group never reuses the kept group's colour",
     ).not.toBe(keptColour);
   });
+
+  // TIDY-20: a malformed (but HTTP-200) model payload degrades gracefully. A
+  // non-string name is coerced (not thrown on), and an index emitted as "2" in
+  // one group and 2 in another places that tab in exactly one group.
+  test("tidies despite a non-string group name and duplicate string/number indices", async ({
+    zen,
+  }) => {
+    await zen.openTabs(4, "Malformed Page ");
+    const n = await zen.collectCount();
+    expect(n, "should have tabs to tidy").toBeGreaterThanOrEqual(4);
+
+    // Group name is the number 5 (coerces to "5"); tab 2 is claimed as the
+    // string "2" in the first group and the number 2 in the second.
+    const malformed =
+      '{"groups":[{"name":5,"tabs":[0,"2"]},{"name":"Reading","tabs":[2,3]}]}';
+    await zen.installFetchRawStub(malformed);
+    try {
+      await zen.clickButton();
+      await zen.driver.wait(
+        async () => {
+          const labels = await zen.groupLabels();
+          return (
+            labels.includes("5") &&
+            labels.includes("Reading") &&
+            labels.includes("Other")
+          );
+        },
+        30_000,
+        "the run did not converge to the expected groups",
+        400,
+      );
+    } finally {
+      await zen.restoreFetch();
+    }
+
+    // Tab 2 lands only in the first group (the duplicate number index is
+    // dropped), so "5" holds tabs 0 and 2, "Reading" only tab 3, and the omitted
+    // tab 1 falls into "Other" — four tabs, each used exactly once.
+    expect(await zen.groupTabCount("5"), '"5" holds its two tabs').toBe(2);
+    expect(
+      await zen.groupTabCount("Reading"),
+      'the duplicate index is dropped from "Reading"',
+    ).toBe(1);
+    expect(
+      await zen.groupTabCount("Other"),
+      "the omitted tab is in Other",
+    ).toBe(1);
+  });
 });
