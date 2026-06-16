@@ -171,6 +171,12 @@
 
   const { win, doc, gBrowser } = env;
 
+  // A fresh marker per script evaluation. Long-lived watchers store it with
+  // their handle so a repeated install within the same load is idempotent,
+  // while a re-evaluation (new token) tears the previous load's watcher down
+  // and rebinds — mirroring editor.install()'s listener-swap discipline.
+  const LOAD_TOKEN = {};
+
   // ============================================================================
   // Native <tab-group> helpers — one place for reading and writing a group's
   // name, color and tabs. The label may live on a property or an attribute, and
@@ -1096,10 +1102,10 @@ Now output only the JSON object.`;
     },
 
     // Watch the tab strip so groups emptied by native drag-and-drop also get
-    // dissolved (the "groups don't always close when empty" bug).
+    // dissolved (the "groups don't always close when empty" bug). On re-eval the
+    // previous load's observer is disconnected before this load's is installed.
     installEmptyWatcher() {
-      if (win.__zenTidyTabsEmptyWatcher) return;
-      win.__zenTidyTabsEmptyWatcher = true;
+      win.__zenTidyTabsEmptyWatcher?.disconnect?.();
       const root = doc.getElementById("tabbrowser-tabs") || doc.documentElement;
       let pending = null;
       const observer = new MutationObserver(() => {
@@ -1110,6 +1116,7 @@ Now output only the JSON object.`;
         }, CONFIG.timing.emptyWatcherDebounceMs);
       });
       observer.observe(root, { childList: true, subtree: true });
+      win.__zenTidyTabsEmptyWatcher = observer;
       Log.groups.debug(
         "Empty-group watcher installed on",
         `${dom.describe(root)}.`,
@@ -1394,17 +1401,34 @@ Now output only the JSON object.`;
     // Some builds only add the Clear control while the separator is hovered.
     // Watch for that and place the twin the moment Clear appears; the watcher
     // stays installed so the twin is re-created if Zen rebuilds the row.
+    // Idempotent within a load; on re-eval the previous load's listener is
+    // removed before this load's is bound.
     installClearWatcher() {
-      if (win.__zenTidyTabsClearWatcher) return;
-      win.__zenTidyTabsClearWatcher = true;
-      // Hover anywhere in the chrome: cheap because placeTwinIfClearPresent
-      // early-returns once a twin exists.
+      const prev = win.__zenTidyTabsClearWatcher;
+      if (prev?.token === LOAD_TOKEN) return;
+      if (prev)
+        prev.target.removeEventListener("mouseover", prev.handler, true);
+
       const target = doc.documentElement;
-      target.addEventListener(
-        "mouseover",
-        () => control.placeTwinIfClearPresent(),
-        true,
-      );
+      // Hot path: a mouseover fires for every pointer move across the chrome, so
+      // gate the full clearControl() scan behind a cheap adjacency check. While
+      // the twin still sits in the active workspace immediately before a Clear
+      // control, there is nothing to do; only re-run the expensive placement
+      // when that cheap check fails.
+      const handler = () => {
+        const existing = doc.getElementById(CONFIG.ui.controlId);
+        if (
+          existing?.dataset?.twin === "1" &&
+          existing.isConnected &&
+          existing.nextElementSibling &&
+          matchesClear(existing.nextElementSibling) &&
+          dom.activeWorkspaceEl()?.contains(existing)
+        )
+          return;
+        control.placeTwinIfClearPresent();
+      };
+      target.addEventListener("mouseover", handler, true);
+      win.__zenTidyTabsClearWatcher = { token: LOAD_TOKEN, target, handler };
       Log.dom.debug(
         "Clear-button hover watcher installed on",
         `${dom.describe(target)}.`,
@@ -1414,15 +1438,18 @@ Now output only the JSON object.`;
     // Zen renders one <zen-workspace> per workspace and swaps the [active] one
     // on every workspace change. Re-mount on each change so the single Tidy
     // control follows the user into whichever workspace they're viewing, instead
-    // of staying behind in the first one (CONTROL-7). Registered once; only set
-    // the guard after a successful registration so init can retry if Zen's
-    // workspace API isn't ready yet.
+    // of staying behind in the first one (CONTROL-7). Idempotent within a load
+    // (registers once, even though mount() retries until Zen's workspace API is
+    // ready); on re-eval the previous load's listener is removed first.
     installWorkspaceWatcher() {
-      if (win.__zenTidyTabsWorkspaceWatcher) return;
+      const prev = win.__zenTidyTabsWorkspaceWatcher;
+      if (prev?.token === LOAD_TOKEN) return;
       const zw = win.gZenWorkspaces;
       if (typeof zw?.addChangeListeners !== "function") return;
-      win.__zenTidyTabsWorkspaceWatcher = true;
-      zw.addChangeListeners(() => control.mount(), { once: false });
+      if (prev) zw.removeChangeListeners?.(prev.listener);
+      const listener = () => control.mount();
+      zw.addChangeListeners(listener, { once: false });
+      win.__zenTidyTabsWorkspaceWatcher = { token: LOAD_TOKEN, listener };
       Log.dom.debug(
         "Workspace-change watcher installed; Tidy control will follow the active workspace.",
       );
@@ -1562,6 +1589,22 @@ Now output only the JSON object.`;
         doc.removeEventListener("contextmenu", prev.onContextMenu, true);
       }
       editor.cancelInline();
+      // A re-eval builds a fresh `editor` (active: null), so cancelInline() can't
+      // reach a previous load's open rename. Clear any stray inline-edit DOM
+      // directly so the old <input>, its hidden measuring span, the still-hidden
+      // label, and the BADGE-7 window-drag override don't survive the reload.
+      for (const input of doc.querySelectorAll(".zen-tidy-tabs-inline-input")) {
+        const measure = input.previousElementSibling;
+        if (measure?.tagName?.toLowerCase() === "span") measure.remove();
+        input.remove();
+      }
+      for (const label of doc.querySelectorAll(
+        ".zen-tidy-tabs-inline-editing",
+      )) {
+        label.style.removeProperty("display");
+        label.classList.remove("zen-tidy-tabs-inline-editing");
+      }
+      doc.documentElement.classList.remove("zen-tidy-tabs-editing");
       // Drop the previous load's native-panel override (it re-installs lazily).
       nativePanel.uninstall();
 

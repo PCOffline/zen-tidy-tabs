@@ -376,6 +376,20 @@ _Verified by: `settings.spec.ts › saved settings persist and are reflected whe
 
 ---
 
+## 9. Script lifecycle
+
+- **RELOAD-1** — **Re-evaluation replaces the previous load cleanly.** The script is designed
+  to be re-evaluated in the same window. On re-eval it tears down the previous load before
+  binding the new one: the group-label editor re-binds its listeners and clears any stray
+  inline rename left open by the prior load (the `<input>`, the hidden native label, and the
+  `:root.zen-tidy-tabs-editing` window-drag override from BADGE-7), and the long-lived window
+  watchers (the Clear-twin hover watcher, the workspace-change watcher, and the empty-group
+  mutation observer) are removed and re-installed rather than duplicated, so exactly one of
+  each runs against the current load.
+  _Verified by: `reeval.spec.ts › re-evaluating the script clears a stray inline rename`._
+
+---
+
 ## Open questions / known divergences
 
 These are unresolved contradictions between this SPEC, the shipped code, and other docs.
