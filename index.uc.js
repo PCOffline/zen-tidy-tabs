@@ -653,7 +653,8 @@ Now output only the JSON object.`;
     },
 
     // Pull the assistant text out of an OpenRouter/OpenAI response, tolerating
-    // array-style content and reasoning-only replies.
+    // array-style content. A reasoning-only reply (empty content) is rejected as
+    // an empty completion rather than parsed: reasoning prose is not the answer.
     extractText(data) {
       if (data.error) {
         const detail = data.error.message || JSON.stringify(data.error);
@@ -687,8 +688,12 @@ Now output only the JSON object.`;
           .join("");
       }
       content = (content || "").trim();
-      if (!content && message?.reasoning)
-        content = String(message.reasoning).trim();
+      if (!content && message?.reasoning) {
+        Log.ai.debug(
+          "Model returned reasoning but no completion; treating as empty.",
+          String(message.reasoning).slice(0, CONFIG.api.outputPreviewMaxChars),
+        );
+      }
 
       if (!content) {
         Log.ai.error(
