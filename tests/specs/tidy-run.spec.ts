@@ -169,6 +169,45 @@ test.describe("Tidy run", () => {
     }
   });
 
+  // TIDY-10: when group creation silently fails (addTabGroup returns falsy rather
+  // than throwing), the run must surface failure, not a false success.
+  test("notifies failure when group creation silently fails", async ({
+    zen,
+  }) => {
+    await zen.openTabs(4, "Silent ");
+    await zen.installFetchStub(PLAN);
+    await zen.exec(() => {
+      window.__zenTidyTabsOrigAddTabGroup = gBrowser.addTabGroup;
+      gBrowser.addTabGroup = () => null;
+      return true;
+    });
+    try {
+      await zen.clickButton();
+      await zen.driver.wait(
+        async () => {
+          const note = await zen.lastNotification();
+          return note != null && /failed/i.test(note);
+        },
+        20_000,
+        "no failure notification was shown",
+        200,
+      );
+      expect(
+        await zen.groupLabels(),
+        "no groups exist after a failed creation",
+      ).toEqual([]);
+    } finally {
+      await zen.exec(() => {
+        if (window.__zenTidyTabsOrigAddTabGroup) {
+          gBrowser.addTabGroup = window.__zenTidyTabsOrigAddTabGroup;
+          window.__zenTidyTabsOrigAddTabGroup = undefined;
+        }
+        return true;
+      });
+      await zen.restoreFetch();
+    }
+  });
+
   // TIDY-14: a notification's auto-dismiss removes only itself, never a later one.
   // With one eligible tab every Tidy click bails on the minimum (TIDY-4) and shows a
   // fresh notification. We reproduce the real cross-test interference: a notification

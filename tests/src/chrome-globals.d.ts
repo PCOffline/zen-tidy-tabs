@@ -131,5 +131,7 @@ declare global {
     /** Resolves a deferred fetch stub so the in-flight run can complete. */
     __zenTidyTabsRelease?: () => void;
     __zenTidyReTidyWatch?: ReTidyWatchState;
+    /** Original `gBrowser.addTabGroup`, stashed by a spec that stubs creation. */
+    __zenTidyTabsOrigAddTabGroup?: GBrowser["addTabGroup"];
   }
 }
