@@ -150,7 +150,7 @@ in-place HTML input the script swaps in for the badge.
 
 - **TIDY-11** — Eligible tabs are collected from the **active workspace only**: a tab that
   belongs to another workspace is never collected, even if it is otherwise eligible.
-  _Unverified._
+  _Verified by: `workspace-collect.spec.ts › collects only the active workspace's tabs`._
 
 - **TIDY-12** — A re-tidy reconsiders the *whole* active workspace, **including
   already-grouped tabs** (`collect(includeGrouped)`), so existing groups can be reorganised
