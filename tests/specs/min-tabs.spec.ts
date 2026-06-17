@@ -36,4 +36,50 @@ test.describe("Minimum tabs", () => {
       await zen.restoreFetch();
     }
   });
+
+  // Boundary (refuse): one below the minimum still refuses and never calls the
+  // model — catches an off-by-one in the `< minTabs` check.
+  test("refuses at one tab below the minimum", async ({ zen }) => {
+    await zen.openTabs(MIN_TABS - 1, "Pair ");
+    const n = await zen.collectCount();
+    expect(n, `exactly ${MIN_TABS - 1} eligible tabs (below the minimum)`).toBe(
+      MIN_TABS - 1,
+    );
+
+    await zen.installFetchStub({ groups: [{ name: "Nope", tabs: [0, 1] }] });
+    try {
+      await zen.clickButton();
+      // Bails synchronously after the min-tabs check; give it a beat to prove no
+      // async model call ever happens.
+      await zen.driver.sleep(1500);
+      expect(
+        await zen.fetchStubCallCount(),
+        "the model must not be called one tab below the minimum",
+      ).toBe(0);
+    } finally {
+      await zen.restoreFetch();
+    }
+  });
+
+  // Boundary (proceed): exactly the minimum proceeds and reaches the model.
+  test("proceeds at exactly the minimum and reaches the model", async ({
+    zen,
+  }) => {
+    await zen.openTabs(MIN_TABS, "Trio ");
+    const n = await zen.collectCount();
+    expect(n, `exactly the ${MIN_TABS}-tab minimum`).toBe(MIN_TABS);
+
+    await zen.installFetchStub({ groups: [{ name: "Trio", tabs: [0, 1, 2] }] });
+    try {
+      await zen.clickButton();
+      await zen.driver.wait(
+        async () => (await zen.fetchStubCallCount()) >= 1,
+        15_000,
+        "the model was never called at the minimum tab count",
+        200,
+      );
+    } finally {
+      await zen.restoreFetch();
+    }
+  });
 });

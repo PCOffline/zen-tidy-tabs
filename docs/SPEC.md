@@ -83,7 +83,9 @@ in-place HTML input the script swaps in for the badge.
 
 - **TIDY-4** — **Minimum of 3 eligible tabs.** With fewer than 3, the run aborts *before*
   contacting the model (no network call, no group creation) and notifies the user.
-  _Verified by: `min-tabs.spec.ts › refuses to tidy below the minimum and never calls the model`._
+  _Verified by: `min-tabs.spec.ts › refuses to tidy below the minimum and never calls the
+  model`, `› refuses at one tab below the minimum`, and `› proceeds at exactly the minimum
+  and reaches the model`._
 
 - **TIDY-5** — The model receives a compact snapshot, one entry per eligible tab:
   `{ i, title, url?, group? }`.
@@ -108,8 +110,8 @@ in-place HTML input the script swaps in for the badge.
   When a tab fits no reasonable category, or many tabs are mutually unrelated, they go into
   an **`Other`** group, which is a genuine last resort.
   _Verified by: `prompt.spec.ts › caps the group count (floor) at clamp(ceil(tabCount/3), 2, 8)`,
-  `› scales the group count cap with the tab count`, and `› carries the grouping and naming
-  rubric`._
+  `› scales the group count cap with the tab count`, `› caps the group count (ceiling) at
+  maxGroups (8)`, and `› carries the grouping and naming rubric`._
 
 - **TIDY-7** — **Stability of existing groups.** When existing groups are present, the
   prompt instructs the model to keep a sensible existing group, reuse its *exact* name,
