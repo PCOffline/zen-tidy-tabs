@@ -18,10 +18,9 @@ Keep `SPEC.md`, the tests, and the code in lockstep. See `.agents/skills/spec-sy
 
 Issues are tracked as GitHub issues on `PCOffline/zen-tidy-tabs` via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
-### Triage labels
-
-Five canonical triage roles, each mapped to its default label string. See `docs/agents/triage-labels.md`.
-
 ### Domain docs
 
-Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+This repo has **no** `CONTEXT.md` or `docs/adr/` yet. The `grill-with-docs` and
+`improve-codebase-architecture` skills create them lazily when domain terms or
+decisions are actually resolved. Until then, treat their absence as normal — see
+`docs/agents/domain.md` for how the skills consume them once they exist.
