@@ -81,10 +81,6 @@ function singletonBudgetPlan(n: number): {
 }
 
 test.describe("Tidying", () => {
-  test.beforeEach(async ({ zen }) => {
-    await zen.reset();
-  });
-
   test("collecting skips pinned, empty, and glance tabs", async ({ zen }) => {
     // TIDY-3: collect() excludes tabs that are pinned, Zen empty, or Zen glance.
     // Arrange: a known set of plain, eligible tabs.

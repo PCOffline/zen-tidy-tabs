@@ -5,10 +5,6 @@ import { expect, test } from "../src/fixtures";
 const MIN_TABS = 3;
 
 test.describe("Minimum tabs", () => {
-  test.beforeEach(async ({ zen }) => {
-    await zen.reset();
-  });
-
   test("refuses to tidy below the minimum and never calls the model", async ({
     zen,
   }) => {

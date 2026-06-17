@@ -24,10 +24,6 @@ function labelBlock(css: string): string {
 }
 
 test.describe("Group appearance", () => {
-  test.beforeEach(async ({ zen }) => {
-    await zen.reset();
-  });
-
   test("text labelstyle renders an Arc-style text-only badge", async ({
     zen,
   }) => {

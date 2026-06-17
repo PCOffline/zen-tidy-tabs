@@ -28,10 +28,6 @@ async function capturePrompt(
 }
 
 test.describe("Tidy prompt", () => {
-  test.beforeEach(async ({ zen }) => {
-    await zen.reset();
-  });
-
   // Floor branch: with few tabs the cap clamps up to the minimum of 2.
   test("caps the group count (floor) at clamp(ceil(tabCount/3), 2, 8)", async ({
     zen,

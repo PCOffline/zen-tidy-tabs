@@ -1,10 +1,6 @@
 import { expect, test } from "../src/fixtures";
 
 test.describe("Tidy button", () => {
-  test.beforeEach(async ({ zen }) => {
-    await zen.reset();
-  });
-
   test("the tidy button exists", async ({ zen }) => {
     await zen.waitForButton();
     expect(await zen.buttonExists()).toBe(true);

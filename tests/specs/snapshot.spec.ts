@@ -10,10 +10,6 @@ const URL_MODE = "zen-tidy-tabs.urlmode";
 const PLAN = { groups: [{ name: "Anything", tabs: [0, 1, 2] }] };
 
 test.describe("Model snapshot", () => {
-  test.beforeEach(async ({ zen }) => {
-    await zen.reset();
-  });
-
   // TIDY-5: shape is {i, title, url?, group?}; query strings/hashes are stripped.
   test("the snapshot has the documented shape and strips query strings", async ({
     zen,
@@ -45,9 +41,6 @@ test.describe("Model snapshot", () => {
       snapshot.forEach((entry, i) => {
         expect(entry.i, "entry index is sequential").toBe(i);
         expect(typeof entry.title, "entry has a string title").toBe("string");
-        expect(Object.keys(entry).sort()).toEqual(
-          expect.arrayContaining(["i", "title"]),
-        );
         // Only the documented keys ever appear.
         for (const key of Object.keys(entry)) {
           expect(["i", "title", "url", "group"]).toContain(key);
