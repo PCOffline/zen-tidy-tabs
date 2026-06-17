@@ -28,15 +28,23 @@ test.describe("Tidy model request", () => {
     await zen.installFetchStub(PLAN);
     try {
       await runToModel(zen);
-      const body = await zen.lastRequestJson();
+      const first = await zen.lastRequestJson();
       expect(
-        body.temperature,
+        first.temperature,
         "temperature is 0 for repeatable clustering",
       ).toBe(0);
       expect(
-        typeof body.seed,
+        typeof first.seed,
         "a fixed seed is sent as a best-effort hint",
       ).toBe("number");
+
+      // The seed is FIXED, not random: a second run sends the exact same seed.
+      // Asserting equality across runs follows the constant rather than
+      // hard-coding its value in the test.
+      await zen.installFetchStub(PLAN);
+      await runToModel(zen);
+      const second = await zen.lastRequestJson();
+      expect(second.seed, "the seed is fixed across runs").toBe(first.seed);
     } finally {
       await zen.restoreFetch();
     }

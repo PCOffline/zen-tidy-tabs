@@ -56,6 +56,19 @@ test.describe("Tidy prompt", () => {
     }
   });
 
+  // Ceiling branch: with many tabs the cap saturates at maxGroups (8).
+  test("caps the group count (ceiling) at maxGroups (8)", async ({ zen }) => {
+    await zen.openTabs(27, "Lots ");
+    try {
+      const { prompt, tabCount } = await capturePrompt(zen);
+      const cap = expectedMaxGroups(tabCount);
+      expect(cap, "plenty of tabs clamp down to the ceiling of 8").toBe(8);
+      expect(prompt).toContain(`between 1 and ${cap} groups`);
+    } finally {
+      await zen.restoreFetch();
+    }
+  });
+
   // The rubric: group by activity, Title-Case 1-3 word names, expandable
   // categories over one-tab descriptions, "Other" as a last resort, grounded in
   // the supplied tabs.
