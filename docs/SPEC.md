@@ -8,7 +8,7 @@ tests under `tests/specs/` exist to verify these clauses and nothing else.
 > **Change protocol.** A behaviour does not exist until it is written here, and a
 > test must not assert anything that is not written here. Any change to behaviour
 > flows **SPEC → tests → code**, in that order, in the same change. See
-> [`.agents/skills/spec-sync/SKILL.md`](./.agents/skills/spec-sync/SKILL.md).
+> [`.agents/skills/spec-sync/SKILL.md`](../.agents/skills/spec-sync/SKILL.md).
 
 Each clause carries:
 
