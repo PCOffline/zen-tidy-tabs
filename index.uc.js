@@ -360,6 +360,10 @@
         )
           return false;
         const tabWorkspace = tab.getAttribute("zen-workspace-id");
+        // Active-workspace only (TIDY-11). A tab with no zen-workspace-id is NOT
+        // excluded: per Zen's _shouldShowTab, untagged non-essential tabs belong
+        // to the active workspace, so only a tab explicitly tagged for a
+        // *different* workspace is dropped. Don't "fix" this to require a tag.
         if (workspaceId && tabWorkspace && tabWorkspace !== workspaceId)
           return false;
         return true;

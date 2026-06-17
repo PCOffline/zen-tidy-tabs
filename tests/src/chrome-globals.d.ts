@@ -111,7 +111,7 @@ declare global {
     mount(): boolean;
     diagnose(): void;
     injectStyles(): void;
-    collect(includeGrouped?: boolean): unknown[];
+    collect(includeGrouped?: boolean): MozTab[];
   }
 
   /** State the re-tidy flicker watcher stashes on `window` (see ZenDriver). */
