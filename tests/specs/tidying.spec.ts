@@ -393,4 +393,114 @@ test.describe("Tidying", () => {
       "the omitted tab is in Other",
     ).toBe(1);
   });
+
+  // TIDY-8: a tab the model omits entirely is folded into the trailing "Other"
+  // group so no tab is lost.
+  test("an omitted tab is folded into Other", async ({ zen }) => {
+    await zen.openTabs(4, "Omit Page ");
+    const n = await zen.collectCount();
+    expect(n, "should have tabs to tidy").toBeGreaterThanOrEqual(4);
+
+    // The plan groups only tabs 0 and 1; tabs 2 and 3 are omitted.
+    const plan: GroupingPlan = { groups: [{ name: "Named", tabs: [0, 1] }] };
+    await zen.installFetchStub(plan);
+    try {
+      await zen.clickButton();
+      await zen.driver.wait(
+        async () => {
+          const labels = await zen.groupLabels();
+          return labels.includes("Named") && labels.includes("Other");
+        },
+        30_000,
+        "the run did not produce Named and Other",
+        400,
+      );
+    } finally {
+      await zen.restoreFetch();
+    }
+
+    expect(await zen.groupTabCount("Named"), '"Named" holds its two tabs').toBe(
+      2,
+    );
+    expect(
+      await zen.groupTabCount("Other"),
+      "the two omitted tabs are collected into Other",
+    ).toBe(2);
+  });
+
+  // TIDY-7: a name-matched group is kept in place across a re-tidy — its colour
+  // and position are preserved and only the changed tabs move in.
+  test("a re-tidy keeps a name-matched group in place (position + colour)", async ({
+    zen,
+  }) => {
+    await zen.openTabs(4, "Keep Page ");
+    const n = await zen.collectCount();
+    expect(n, "should have tabs to tidy").toBeGreaterThanOrEqual(4);
+
+    const first: GroupingPlan = {
+      groups: [
+        { name: "Keep", tabs: [0, 1] },
+        { name: "Move", tabs: [2, 3] },
+      ],
+    };
+    await zen.installFetchStub(first);
+    try {
+      await zen.clickButton();
+      await zen.driver.wait(
+        async () => {
+          const labels = await zen.groupLabels();
+          return labels.includes("Keep") && labels.includes("Move");
+        },
+        30_000,
+        "first tidy did not create Keep and Move",
+        400,
+      );
+    } finally {
+      await zen.restoreFetch();
+    }
+
+    const keepColour = await zen.groupColor("Keep");
+    const orderBefore = await zen.groupLabels();
+    const keepIndexBefore = orderBefore.indexOf("Keep");
+    expect(keepColour, "the kept group has a colour").not.toBe("");
+
+    // Re-tidy: reuse "Keep" (exact name) but with changed membership — tab 2
+    // moves into Keep, leaving Move with only tab 3.
+    const second: GroupingPlan = {
+      groups: [
+        { name: "Keep", tabs: [0, 1, 2] },
+        { name: "Move", tabs: [3] },
+      ],
+    };
+    await zen.installFetchStub(second);
+    try {
+      await zen.clickButton();
+      await zen.driver.wait(
+        async () => (await zen.groupTabCount("Keep")) === 3,
+        30_000,
+        "re-tidy did not move the changed tab into Keep",
+        400,
+      );
+    } finally {
+      await zen.restoreFetch();
+    }
+
+    // Kept in place: same colour (a rebuilt group would draw a fresh palette
+    // colour) and same position among the groups; only the changed tab moved.
+    expect(await zen.groupColor("Keep"), "kept group keeps its colour").toBe(
+      keepColour,
+    );
+    const orderAfter = await zen.groupLabels();
+    expect(orderAfter.indexOf("Keep"), "kept group keeps its position").toBe(
+      keepIndexBefore,
+    );
+    expect(
+      await zen.groupTabCount("Keep"),
+      "the changed tab moved into Keep",
+    ).toBe(3);
+    expect(
+      await zen.groupTabCount("Move"),
+      "Move keeps only its remaining tab",
+    ).toBe(1);
+  });
 });

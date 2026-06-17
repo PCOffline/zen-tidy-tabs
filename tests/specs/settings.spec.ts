@@ -37,41 +37,33 @@ test.describe("Settings", () => {
       labelStyle: "zen-tidy-tabs.labelstyle",
     };
 
-    try {
-      // Open the modal, change every field, and save.
-      await zen.rightClickButton();
-      await zen.waitForOverlay();
-      await zen.fillSettings({ apiKey, model });
-      await zen.selectSegment("Minimal"); // urlmode → minimal
-      await zen.selectSegment("Text only"); // labelstyle → text
-      await zen.clickPrimary();
-      await zen.waitForNoOverlay();
+    // Open the modal, change every field, and save. reset() restores these prefs
+    // to the suite baseline before the next test, so no per-test teardown.
+    await zen.rightClickButton();
+    await zen.waitForOverlay();
+    await zen.fillSettings({ apiKey, model });
+    await zen.selectSegment("Minimal"); // urlmode → minimal
+    await zen.selectSegment("Text only"); // labelstyle → text
+    await zen.clickPrimary();
+    await zen.waitForNoOverlay();
 
-      // The choices are written to about:config prefs.
-      expect(await zen.readPref(prefs.apiKey)).toBe(apiKey);
-      expect(await zen.readPref(prefs.model)).toBe(model);
-      expect(await zen.readPref(prefs.urlMode)).toBe("minimal");
-      expect(await zen.readPref(prefs.labelStyle)).toBe("text");
+    // The choices are written to about:config prefs.
+    expect(await zen.readPref(prefs.apiKey)).toBe(apiKey);
+    expect(await zen.readPref(prefs.model)).toBe(model);
+    expect(await zen.readPref(prefs.urlMode)).toBe("minimal");
+    expect(await zen.readPref(prefs.labelStyle)).toBe("text");
 
-      // Reopening the modal reflects the saved values.
-      await zen.rightClickButton();
-      await zen.waitForOverlay();
-      const values = await zen.settingsInputValues();
-      expect(values.apiKey).toBe(apiKey);
-      expect(values.model).toBe(model);
-      expect(await zen.activeSegments()).toEqual(
-        expect.arrayContaining(["Minimal", "Text only"]),
-      );
-      await zen.pressEscape();
-      await zen.waitForNoOverlay();
-    } finally {
-      // Restore defaults so other specs in this worker keep a usable key and
-      // the default url/label behavior.
-      await zen.setPref(prefs.urlMode, "detailed");
-      await zen.setPref(prefs.labelStyle, "filled");
-      await zen.setPref(prefs.model, "");
-      await zen.setPref(prefs.apiKey, "sk-or-v1-zen-tidy-tabs-test-key");
-    }
+    // Reopening the modal reflects the saved values.
+    await zen.rightClickButton();
+    await zen.waitForOverlay();
+    const values = await zen.settingsInputValues();
+    expect(values.apiKey).toBe(apiKey);
+    expect(values.model).toBe(model);
+    expect(await zen.activeSegments()).toEqual(
+      expect.arrayContaining(["Minimal", "Text only"]),
+    );
+    await zen.pressEscape();
+    await zen.waitForNoOverlay();
   });
 
   // SETTINGS-3: Cancel, the ✕ button, Escape, and clicking outside the panel

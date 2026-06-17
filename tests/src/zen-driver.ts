@@ -386,54 +386,108 @@ export class ZenDriver {
   // ---- tabs & groups -----------------------------------------------------
 
   /**
-   * Reset to a clean single-tab, no-group state and dismiss any open modal.
-   * Safe to call before every test.
+   * Reset to a clean single-tab, no-group state, dismiss any open modal, restore
+   * the script's four prefs to their suite baseline, and clear notifications.
+   * Hermetic setup lives here so a test that changes a pref or leaves a
+   * notification up can't leak into the next test if it throws before its
+   * `finally`. Safe to call before every test.
    */
   async reset(): Promise<void> {
     await this.restoreFetch();
-    await this.exec((overlayId: string) => {
-      const overlay = document.getElementById(overlayId);
-      if (overlay) {
-        overlay.remove();
-      }
-
-      // Keep Zen's original startup tab as the blank keeper instead of opening
-      // a fresh tab and closing the original. Closing the startup tab leaves a
-      // dangling shutdown blocker that makes a later driver.quit() hang ~60s on
-      // Firefox's async-shutdown watchdog; reusing it avoids that entirely.
-      const keep = gBrowser.tabs[0];
-      if (!keep) {
-        return true;
-      }
-      gBrowser.selectedTab = keep;
-
-      for (const t of [...gBrowser.tabs]) {
-        if (t === keep || t.pinned) {
-          continue;
+    await this.exec(
+      (cfg: {
+        overlayId: string;
+        msgValue: string;
+        prefs: {
+          apiKey: string;
+          model: string;
+          labelStyle: string;
+          urlMode: string;
+        };
+        defaults: {
+          apiKey: string;
+          model: string;
+          labelStyle: string;
+          urlMode: string;
+        };
+      }) => {
+        const overlay = document.getElementById(cfg.overlayId);
+        if (overlay) {
+          overlay.remove();
         }
-        try {
-          gBrowser.removeTab(t, { animate: false });
-        } catch {
-          // ignore tabs that refuse to close; reset is best effort
+
+        // Keep Zen's original startup tab as the blank keeper instead of opening
+        // a fresh tab and closing the original. Closing the startup tab leaves a
+        // dangling shutdown blocker that makes a later driver.quit() hang ~60s on
+        // Firefox's async-shutdown watchdog; reusing it avoids that entirely.
+        const keep = gBrowser.tabs[0];
+        if (!keep) {
+          return true;
         }
-      }
-      for (const g of document.querySelectorAll<MozTabGroup>("tab-group")) {
-        try {
-          if (typeof gBrowser.removeTabGroup === "function") {
-            gBrowser.removeTabGroup(g);
-          } else {
-            g.remove();
+        gBrowser.selectedTab = keep;
+
+        for (const t of [...gBrowser.tabs]) {
+          if (t === keep || t.pinned) {
+            continue;
           }
-        } catch {
           try {
-            g.remove();
+            gBrowser.removeTab(t, { animate: false });
           } catch {
-            // group already detached; nothing left to do
+            // ignore tabs that refuse to close; reset is best effort
           }
         }
-      }
-      return true;
-    }, S.overlayId);
+        for (const g of document.querySelectorAll<MozTabGroup>("tab-group")) {
+          try {
+            if (typeof gBrowser.removeTabGroup === "function") {
+              gBrowser.removeTabGroup(g);
+            } else {
+              g.remove();
+            }
+          } catch {
+            try {
+              g.remove();
+            } catch {
+              // group already detached; nothing left to do
+            }
+          }
+        }
+
+        // Restore the four prefs to the suite baseline (a usable stub key, no
+        // model override, filled labels, detailed urls).
+        Services.prefs.setStringPref(cfg.prefs.apiKey, cfg.defaults.apiKey);
+        Services.prefs.setStringPref(cfg.prefs.model, cfg.defaults.model);
+        Services.prefs.setStringPref(
+          cfg.prefs.labelStyle,
+          cfg.defaults.labelStyle,
+        );
+        Services.prefs.setStringPref(cfg.prefs.urlMode, cfg.defaults.urlMode);
+
+        // Drain any pending notification so the box starts empty.
+        try {
+          const box = gBrowser.getNotificationBox();
+          let note = box.getNotificationWithValue?.(cfg.msgValue);
+          let guard = 0;
+          while (note && guard++ < 20) {
+            box.removeNotification?.(note);
+            note = box.getNotificationWithValue?.(cfg.msgValue);
+          }
+        } catch {
+          // notification box unavailable; nothing to clear
+        }
+        return true;
+      },
+      {
+        overlayId: S.overlayId,
+        msgValue: "zen-tidy-tabs-msg",
+        prefs: S.prefs,
+        defaults: {
+          apiKey: STUB_API_KEY,
+          model: "",
+          labelStyle: "filled",
+          urlMode: "detailed",
+        },
+      },
+    );
   }
 
   /** Open `n` ungrouped data: tabs with distinct titles; wait until eligible. */
@@ -632,6 +686,13 @@ export class ZenDriver {
       }
       return true;
     }, label);
+  }
+
+  /** currentURI.spec of every open tab (for asserting navigation completed). */
+  tabUrlSpecs(): Promise<string[]> {
+    return this.exec(() =>
+      [...gBrowser.tabs].map((t) => t.linkedBrowser?.currentURI?.spec || ""),
+    );
   }
 
   // ---- re-tidy flicker watcher -------------------------------------------

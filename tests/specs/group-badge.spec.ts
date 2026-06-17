@@ -1,8 +1,20 @@
 import { expect, test } from "../src/fixtures";
+import type { ZenDriver } from "../src/zen-driver";
 
 // Real pointer/keyboard input is unreliable headless (popups don't open, native
 // clicks miss), so the real-input specs below self-skip there.
 const HEADLESS = process.env.ZEN_HEADLESS === "1";
+
+/** Enter inline-edit mode on a group badge via a dispatched left click. */
+async function startInlineEdit(zen: ZenDriver, label: string): Promise<void> {
+  await zen.clickLabelOnce(label);
+  await zen.driver.wait(
+    async () => await zen.labelIsEditing(label),
+    5_000,
+    `badge "${label}" did not enter inline-edit mode`,
+    150,
+  );
+}
 
 test.describe("Group badge editing", () => {
   test.beforeEach(async ({ zen }) => {
@@ -44,6 +56,55 @@ test.describe("Group badge editing", () => {
     );
     expect(await zen.groupLabelExists(renamed)).toBe(true);
     expect(await zen.groupLabelExists(original)).toBe(false);
+  });
+
+  // BADGE-3: Enter commits a trimmed name, and rejects an empty/whitespace or
+  // unchanged value (the group keeps its name).
+  test("Enter trims the name and rejects an empty or unchanged rename", async ({
+    zen,
+  }) => {
+    // Trimmed: surrounding whitespace is stripped on commit.
+    await zen.createGroup("Trim Me", "blue", 2);
+    await startInlineEdit(zen, "Trim Me");
+    await zen.commitInlineRename("Trim Me", "  Trimmed  ");
+    await zen.driver.wait(
+      async () => await zen.groupLabelExists("Trimmed"),
+      5_000,
+      "Enter did not commit the trimmed name",
+      150,
+    );
+    expect(await zen.groupLabelExists("Trimmed")).toBe(true);
+    expect(await zen.groupLabelExists("Trim Me")).toBe(false);
+
+    // Empty/whitespace: rejected; the group keeps its name and leaves edit mode.
+    await zen.createGroup("Keep Empty", "red", 2);
+    await startInlineEdit(zen, "Keep Empty");
+    await zen.commitInlineRename("Keep Empty", "   ");
+    await zen.driver.wait(
+      async () => !(await zen.labelIsEditing("Keep Empty")),
+      5_000,
+      "an empty rename did not leave edit mode",
+      150,
+    );
+    expect(
+      await zen.groupLabelExists("Keep Empty"),
+      "an empty rename is rejected",
+    ).toBe(true);
+
+    // Unchanged: committing the identical name is a no-op.
+    await zen.createGroup("No Change", "green", 2);
+    await startInlineEdit(zen, "No Change");
+    await zen.commitInlineRename("No Change", "No Change");
+    await zen.driver.wait(
+      async () => !(await zen.labelIsEditing("No Change")),
+      5_000,
+      "an unchanged rename did not leave edit mode",
+      150,
+    );
+    expect(
+      await zen.groupLabelExists("No Change"),
+      "an unchanged rename is a no-op",
+    ).toBe(true);
   });
 
   // ---- right click: native edit panel -------------------------------------

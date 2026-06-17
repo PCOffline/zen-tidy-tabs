@@ -11,6 +11,8 @@ declare global {
   interface MozTab extends Element {
     pinned: boolean;
     group: MozTabGroup | null;
+    /** The tab's browser; `currentURI.spec` is the URL it currently shows. */
+    linkedBrowser?: { currentURI?: { spec?: string } | null } | null;
   }
 
   /** A Firefox/Zen `<tab-group>` custom element. */

@@ -94,8 +94,9 @@ in-place HTML input the script swaps in for the badge.
   - `group` is included **only** for tabs that are already in a group, and carries that
     group's current name as a *hint* for keeping existing groupings stable (§2 TIDY-7).
   _Verified by: `snapshot.spec.ts › the snapshot has the documented shape and strips query
-  strings`, `› already-grouped tabs carry their group name and ungrouped tabs do not`, and
-  `› the urlmode preference controls whether a url is sent`._
+  strings`, `› already-grouped tabs carry their group name and ungrouped tabs do not`,
+  `› the urlmode preference controls whether a url is sent`, and
+  `› compact urlmode sends the hostname only`._
 
 - **TIDY-6** — The prompt caps the number of groups at `clamp(ceil(tabCount / 3), 2, 8)`
   and instructs the model to group by what the user is *doing*, name groups in 1–3 words
@@ -117,10 +118,10 @@ in-place HTML input the script swaps in for the badge.
   group is **kept in place** — its position and colour are preserved and only the tabs
   that actually changed are moved in. Genuinely new groups are created; existing groups
   the plan abandons are dissolved.
-  _Partially verified by: `tidying.spec.ts › re-tidying never paints the old groups beneath
-  the new ones` (a re-tidy reconciles against the existing groups and dissolves the ones the
-  plan abandons). The **keep-in-place** stability — a name-matched group preserving its
-  position and colour while only the changed tabs move — is **not yet asserted** (gap)._
+  _Verified by: `tidying.spec.ts › a re-tidy keeps a name-matched group in place (position +
+  colour)` (a name-matched group keeps its colour and position while only the changed tab
+  moves in) and `› re-tidying never paints the old groups beneath the new ones` (the
+  reconcile/dissolve path for the groups the plan abandons)._
 
   > Note: position/colour are preserved only when the planned name matches an existing
   > group's name (case/space-insensitive). If the model renames a group, that group is
@@ -129,7 +130,8 @@ in-place HTML input the script swaps in for the badge.
 - **TIDY-8** — Plan parsing maps `{ groups: [{ name, tabs: [<index>] }] }` back to real
   tabs. Each tab index is used at most once. Any eligible tab the model omits is collected
   into the trailing **`Other`** group (see TIDY-13) so no tab is lost.
-  _Verified by: `tidying.spec.ts › tidying the tabs actually works`._
+  _Verified by: `tidying.spec.ts › tidying the tabs actually works` and
+  `› an omitted tab is folded into Other`._
 
 - **TIDY-9** — Applying a plan **never nests** one group inside another, and **never shows
   the old groups stacked beneath the new ones** during a re-tidy (no husk flicker):
@@ -245,7 +247,8 @@ in-place HTML input the script swaps in for the badge.
 
 - **BADGE-3** — **Enter saves.** Pressing Enter commits the rename. The new name is
   trimmed; the rename is applied only when it is non-empty and differs from the original.
-  _Verified by: `group-badge.spec.ts › left-clicking the group badge renames it inline`._
+  _Verified by: `group-badge.spec.ts › left-clicking the group badge renames it inline` and
+  `› Enter trims the name and rejects an empty or unchanged rename`._
 
 - **BADGE-4** — **Escape cancels.** Pressing Escape abandons the edit and restores the
   original name; nothing typed is saved.
