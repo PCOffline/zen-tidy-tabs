@@ -26,8 +26,9 @@ native sidebar. Organise your tabs by categories in the press of a button.
   reorganized. Emptied groups dissolve automatically.
 - **Rename & recolor** — left-click a group label to rename it inline; right-click
   it for more group options like renaming and recoloring.
-- **Privacy-aware** — query strings are never sent to the model, and you choose how
-  much of each tab is shared (title only, title + domain, or title + URL).
+- **Privacy-aware** — query strings and URL fragments are never sent to the model,
+  and you choose how much of each tab is shared (title only, title + domain, or
+  title + URL).
 
 ## Requirements
 
@@ -68,8 +69,8 @@ control). The same options are also exposed as `about:config` preferences:
 |---|---|---|---|
 | `zen-tidy-tabs.apikey` | String | `sk-or-v1-...` | Your OpenRouter API key. |
 | `zen-tidy-tabs.model` | String | model slug | Model to use. Defaults to `openai/gpt-4o-mini`. |
-| `zen-tidy-tabs.urlmode` | String | `detailed` \| `compact` \| `minimal` | How much of each tab is sent to the model. `detailed` = title + URL, `compact` = title + domain, `minimal` = title only. Default: `detailed`. Query strings are never sent. |
-| `zen-tidy-tabs.labelstyle` | String | `filled` \| `text` | Visual style of group labels. |
+| `zen-tidy-tabs.urlmode` | String | `detailed` \| `compact` \| `minimal` | How much of each tab is sent to the model. `detailed` = title + URL (scheme + host + path), `compact` = title + domain, `minimal` = title only. Default: `detailed`. Query strings and fragments are never sent. |
+| `zen-tidy-tabs.labelstyle` | String | `filled` \| `text` | Visual style of group labels. Default: `filled`. |
 
 **Choosing a model:** avoid `openrouter/free` and reasoning-style models — they
 often return empty content. Use a concrete instruct model. Good options include
@@ -106,6 +107,10 @@ Issues and pull requests are welcome at
 reporting a bug, please include your Zen version, the model you're using, and any
 relevant output from the Browser Console (lines are prefixed with
 `[Zen Tidy Tabs]`).
+
+The product's behaviour is specified in **[docs/SPEC.md](./docs/SPEC.md)** — the
+single source of truth — and verified by an end-to-end test suite. See
+**[docs/testing.md](./docs/testing.md)** for how to run the tests.
 
 ## Disclaimer
 

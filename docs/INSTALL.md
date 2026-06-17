@@ -6,7 +6,7 @@ run these on their own — they need a loader. The recommended loader is
 
 > Heads up: this script runs with **full browser privileges**. Read the source
 > before installing it, and only run versions you trust. Provided as-is, with no
-> warranty or guarantees (see the disclaimer in `README.txt`).
+> warranty or guarantees (see the disclaimer in `README.md`).
 
 You will need an [OpenRouter](https://openrouter.ai/keys) API key to use the
 AI tidying. Keep it handy — you will enter it once everything is installed (see
@@ -50,6 +50,10 @@ Set it through the Tidy settings modal:
 
 Your key is stored locally on your machine. You can reopen this modal any time to
 change the key, switch models, or adjust the other appearance options.
+
+> [!WARNING]
+> The key is stored **in plaintext** in your profile's `prefs.js`. It is
+> recommended this key has a sane usage limit, in case of a leak.
 
 ---
 
