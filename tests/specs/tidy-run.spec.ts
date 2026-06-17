@@ -103,7 +103,6 @@ test.describe("Tidy run", () => {
   // TIDY-1: with no key, the run aborts before any network call and notifies.
   test("refuses to run without an API key and notifies", async ({ zen }) => {
     await zen.openTabs(4, "NoKey ");
-    const savedKey = await zen.readPref(API_KEY);
     await zen.installFetchStub(PLAN);
     try {
       await zen.setPref(API_KEY, "");
@@ -124,7 +123,6 @@ test.describe("Tidy run", () => {
       );
       expect(note).toContain(API_KEY);
     } finally {
-      await zen.setPref(API_KEY, savedKey);
       await zen.restoreFetch();
     }
   });

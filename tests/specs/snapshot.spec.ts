@@ -151,7 +151,66 @@ test.describe("Model snapshot", () => {
         "minimal mode sends no url",
       ).toBe(true);
     } finally {
-      await zen.setPref(URL_MODE, "detailed");
+      await zen.restoreFetch();
+    }
+  });
+
+  // TIDY-5: compact urlmode sends the hostname only (no scheme, path, query).
+  test("compact urlmode sends the hostname only", async ({ zen }) => {
+    // Real hosts + paths so compact (hostname) is distinguishable from detailed
+    // (host + path) and minimal (no url). currentURI reflects the requested URL
+    // even when the page never loads offline.
+    await zen.openTabsRaw([
+      "https://example.com/alpha/one?token=secret",
+      "https://docs.example.org/beta/two#frag",
+      "https://sub.example.net/gamma/three",
+    ]);
+    await zen.setPref(URL_MODE, "compact");
+    // Wait for the tabs to actually navigate to their hosts: currentURI updates
+    // asynchronously, and compact mode needs a real hostname to format.
+    await zen.driver.wait(
+      async () => {
+        const specs = await zen.tabUrlSpecs();
+        return ["example.com", "docs.example.org", "sub.example.net"].every(
+          (host) => specs.some((spec) => spec.includes(host)),
+        );
+      },
+      20_000,
+      "the tabs did not finish navigating to their hosts",
+      300,
+    );
+    await zen.installFetchStub(PLAN);
+    try {
+      await zen.clickButton();
+      await zen.driver.wait(
+        async () => (await zen.fetchStubCallCount()) >= 1,
+        15_000,
+        "the model was never called (compact)",
+        200,
+      );
+
+      const snapshot = await zen.lastRequestSnapshot();
+      const urls = snapshot
+        .map((e) => e.url)
+        .filter((u): u is string => typeof u === "string" && u.length > 0);
+      expect(
+        urls.length,
+        "compact still sends a url for each real-host tab",
+      ).toBeGreaterThanOrEqual(3);
+      for (const url of urls) {
+        // Hostname only: no scheme, no path, no query, no hash.
+        expect(url, "compact strips the path").not.toContain("/");
+        expect(url, "compact strips the query").not.toContain("?");
+        expect(url, "compact strips the hash").not.toContain("#");
+      }
+      expect(urls, "the url is the tab's hostname").toEqual(
+        expect.arrayContaining([
+          "example.com",
+          "docs.example.org",
+          "sub.example.net",
+        ]),
+      );
+    } finally {
       await zen.restoreFetch();
     }
   });
@@ -177,7 +236,6 @@ test.describe("Model snapshot", () => {
         "a bogus urlmode behaves like detailed and still sends urls",
       ).toBe(true);
     } finally {
-      await zen.setPref(URL_MODE, "detailed");
       await zen.restoreFetch();
     }
   });
