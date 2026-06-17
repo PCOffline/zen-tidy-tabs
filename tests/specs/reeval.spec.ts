@@ -6,10 +6,6 @@ import { expect, test } from "../src/fixtures";
 // cleanup the old <input> stays in the DOM, the label stays hidden, and the
 // BADGE-7 window-drag override is never cleared.
 test.describe("Script re-evaluation", () => {
-  test.beforeEach(async ({ zen }) => {
-    await zen.reset();
-  });
-
   test("re-evaluating the script clears a stray inline rename", async ({
     zen,
   }) => {

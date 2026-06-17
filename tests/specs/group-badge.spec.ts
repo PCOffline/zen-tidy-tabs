@@ -17,10 +17,6 @@ async function startInlineEdit(zen: ZenDriver, label: string): Promise<void> {
 }
 
 test.describe("Group badge editing", () => {
-  test.beforeEach(async ({ zen }) => {
-    await zen.reset();
-  });
-
   test.afterEach(async ({ zen }) => {
     // Right-click tests leave Zen's native panel open; dismiss it so it can't
     // bleed into the next test.

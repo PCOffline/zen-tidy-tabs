@@ -22,11 +22,6 @@ async function runToModel(
 }
 
 test.describe("Tidy model request", () => {
-  test.beforeEach(async ({ zen }) => {
-    await zen.reset();
-    await zen.clearNotifications();
-  });
-
   // TIDY-15: the request is sampled deterministically.
   test("sends deterministic sampling parameters", async ({ zen }) => {
     await zen.openTabs(4, "Sampling ");

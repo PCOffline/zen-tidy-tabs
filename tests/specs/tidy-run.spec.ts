@@ -10,12 +10,12 @@ const IDLE_LABEL = "🧹 Tidy";
 const BUSY_LABEL = "↻ Tidying…";
 const PLAN = { groups: [{ name: "Anything", tabs: [0, 1, 2] }] };
 
-test.describe("Tidy run", () => {
-  test.beforeEach(async ({ zen }) => {
-    await zen.reset();
-    await zen.clearNotifications();
-  });
+// Mirrors CONFIG.timing.notifyDurationMs in index.uc.js: how long a notification
+// stays up before its auto-dismiss timer fires. The TIDY-14 timing below is
+// derived from this so it tracks the script instead of hard-coding magic delays.
+const NOTIFY_DURATION_MS = 6000;
 
+test.describe("Tidy run", () => {
   // CONTROL-4: the control shows a busy, non-interactive state mid-run.
   test("the control shows a busy state while a run is in progress", async ({
     zen,
@@ -209,7 +209,7 @@ test.describe("Tidy run", () => {
   // TIDY-14: a notification's auto-dismiss removes only itself, never a later one.
   // With one eligible tab every Tidy click bails on the minimum (TIDY-4) and shows a
   // fresh notification. We reproduce the real cross-test interference: a notification
-  // is cleared from the box (as beforeEach does between tests) while its auto-dismiss
+  // is cleared from the box (as reset() does between tests) while its auto-dismiss
   // timer is still pending, then a later notification takes the shared value slot.
   test("a notification's auto-dismiss never removes a later notification", async ({
     zen,
@@ -226,12 +226,13 @@ test.describe("Tidy run", () => {
     );
 
     // Remove A from the box without cancelling its pending timer — exactly what the
-    // beforeEach clear does between real tests.
+    // reset() clear does between real tests.
     await zen.clearNotifications();
 
-    // Show notification B in the now-empty box. B reuses A's shared value but is a
-    // distinct element, so A's stale value-based timer would target B.
-    await zen.driver.sleep(3_500);
+    // Show notification B in the now-empty box, partway through A's lifetime (so
+    // A's stale value-based timer would still target B). B reuses A's shared
+    // value but is a distinct element.
+    await zen.driver.sleep(NOTIFY_DURATION_MS / 2);
     await zen.clickButton();
     await zen.driver.wait(
       async () => (await zen.lastNotification()) != null,
@@ -240,9 +241,10 @@ test.describe("Tidy run", () => {
       100,
     );
 
-    // Past when A's timer fires, but well before B's: value-removal deletes the only
+    // Wait until past A's timer (notifyDurationMs after A, i.e. ~half its
+    // duration after B) but before B's own: value-removal would delete the only
     // notification carrying the shared value (= B); each-dismisses-itself keeps B.
-    await zen.driver.sleep(4_000);
+    await zen.driver.sleep(NOTIFY_DURATION_MS / 2 + 1_000);
     expect(
       await zen.lastNotification(),
       "the later notification survives the earlier one's auto-dismiss",

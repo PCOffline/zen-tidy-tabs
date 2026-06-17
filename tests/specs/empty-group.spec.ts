@@ -1,10 +1,6 @@
 import { expect, test } from "../src/fixtures";
 
 test.describe("Empty group cleanup", () => {
-  test.beforeEach(async ({ zen }) => {
-    await zen.reset();
-  });
-
   test("a group whose tabs all close is dissolved automatically", async ({
     zen,
   }) => {

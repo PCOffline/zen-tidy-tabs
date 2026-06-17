@@ -1,10 +1,6 @@
 import { expect, test } from "../src/fixtures";
 
 test.describe("Settings", () => {
-  test.beforeEach(async ({ zen }) => {
-    await zen.reset();
-  });
-
   test("right-clicking the button opens the Zen Tidy Tabs configuration", async ({
     zen,
   }) => {

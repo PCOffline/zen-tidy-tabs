@@ -5,10 +5,6 @@ import { expect, test } from "../src/fixtures";
 // missing. These tests create a second workspace, switch to it, and assert the
 // single Tidy control is present in whichever workspace is active.
 test.describe("Tidy control across workspaces", () => {
-  test.beforeEach(async ({ zen }) => {
-    await zen.reset();
-  });
-
   test("the tidy control follows the active workspace", async ({ zen }) => {
     test.skip(
       !(await zen.workspacesAvailable()),

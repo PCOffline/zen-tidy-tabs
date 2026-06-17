@@ -38,6 +38,11 @@
       "suspicious": {
         "useAwait": "error",
         "noEmptyBlockStatements": "error"
+      },
+      "correctness": {
+        "noUnusedVariables": "error",
+        "noUnusedImports": "error",
+        "noUnusedFunctionParameters": "error"
       }
     }
   },

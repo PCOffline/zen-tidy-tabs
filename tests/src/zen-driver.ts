@@ -1699,14 +1699,6 @@ export class ZenDriver {
 
   // ---- tidy run / snapshot / appearance ----------------------------------
 
-  /** Trigger a tidy run programmatically (window.zenTidyTabs.run()). */
-  async runTidy(): Promise<void> {
-    await this.exec(() => {
-      window.zenTidyTabs.run();
-      return true;
-    });
-  }
-
   /** The Tidy control's current label text and inline pointer-events value. */
   buttonBusyState(): Promise<{ label: string; pointerEvents: string }> {
     return this.exec((id: string) => {
