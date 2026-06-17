@@ -90,7 +90,8 @@ in-place HTML input the script swaps in for the badge.
 - **TIDY-5** — The model receives a compact snapshot, one entry per eligible tab:
   `{ i, title, url?, group? }`.
   - `title` is always sent (truncated to a max length).
-  - `url` is included per the privacy preference (§6 `urlmode`): `detailed` = host + path,
+  - `url` is included per the privacy preference (§6 `urlmode`): `detailed` = the URL minus
+    query string and fragment (**scheme + host + path**, e.g. `https://example.com/path`),
     `compact` = hostname only, `minimal` = omitted. **Query strings and hashes are never
     sent.**
   - `group` is included **only** for tabs that are already in a group, and carries that
@@ -127,7 +128,7 @@ in-place HTML input the script swaps in for the badge.
 
   > Note: position/colour are preserved only when the planned name matches an existing
   > group's name (case/space-insensitive). If the model renames a group, that group is
-  > treated as new and may be repositioned. See Open Question OQ-4.
+  > treated as new and may be repositioned. See Open Question OQ-1.
 
 - **TIDY-8** — Plan parsing maps `{ groups: [{ name, tabs: [<index>] }] }` back to real
   tabs. Each tab index is used at most once. Any eligible tab the model omits is collected
@@ -359,7 +360,7 @@ All settings live under `about:config` and are editable both there and via the m
 | Pref | Values | Default | Clause |
 |---|---|---|---|
 | `zen-tidy-tabs.apikey` | OpenRouter key string | empty | TIDY-1, SETTINGS-2 |
-| `zen-tidy-tabs.model` | model slug | `openai/gpt-4o-mini` | TIDY-5, SETTINGS-2 |
+| `zen-tidy-tabs.model` | model slug | `openai/gpt-4o-mini` | TIDY-15, SETTINGS-2 |
 | `zen-tidy-tabs.labelstyle` | `filled` \| `text` | `filled` | LABEL-1 |
 | `zen-tidy-tabs.urlmode` | `detailed` \| `compact` \| `minimal` | `detailed` | TIDY-5 |
 
@@ -412,7 +413,7 @@ These are unresolved contradictions between this SPEC, the shipped code, and oth
 Each must be closed by editing the SPEC (and then tests + code) or by fixing the code —
 never left silently divergent.
 
-- **OQ-4 — Rename breaks position stability.** Per TIDY-7, an existing group keeps its
+- **OQ-1 — Rename breaks position stability.** Per TIDY-7, an existing group keeps its
   position/colour only when the planned name matches its current name. If the model renames
   an otherwise-stable group, it is rebuilt and may move. Decide whether this is acceptable
   or whether reconciliation should match groups by membership as well as name.
