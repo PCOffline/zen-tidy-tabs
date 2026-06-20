@@ -1,0 +1,4 @@
+export PATH="$HOME/AppData/Local/mise/shims:$PATH"
+
+npm run build
+git add index.uc.js
