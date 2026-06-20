@@ -1239,7 +1239,8 @@ Now output only the JSON object.`;
   // ============================================================================
   const ui = {
     // A segmented single-choice control. options = [[value, text], ...].
-    segmentedControl(options, current) {
+    // `onChange(value)` fires whenever the selection changes.
+    segmentedControl(options, current, onChange) {
       let value = current;
       const segment = make.el("div", "zen-tidy-tabs-segment");
       for (const [optionValue, text] of options) {
@@ -1251,6 +1252,7 @@ Now output only the JSON object.`;
             s.classList.remove("active");
           }
           button.classList.add("active");
+          onChange?.(optionValue);
         });
         segment.append(button);
       }
@@ -1277,6 +1279,16 @@ Now output only the JSON object.`;
         ],
         prefs.labelStyle(),
       );
+      const urlNotes = {
+        detailed: "The tab's title and full URL are sent to the AI.",
+        compact: "The tab's title and hostname are sent to the AI.",
+        minimal: "Only the tab's title is sent to the AI.",
+      };
+      const urlHint = make.el(
+        "p",
+        "zen-tidy-tabs-privacy-note",
+        urlNotes[prefs.urlMode()] ?? urlNotes.detailed,
+      );
       const urlSegment = ui.segmentedControl(
         [
           ["detailed", "Detailed"],
@@ -1284,12 +1296,9 @@ Now output only the JSON object.`;
           ["minimal", "Minimal"],
         ],
         prefs.urlMode(),
-      );
-      const urlHint = make.el(
-        "p",
-        "zen-tidy-tabs-hint",
-        "What each tab sends to the AI — Detailed: title + URL · Compact: title + domain · " +
-          "Minimal: title only. Query strings are never sent.",
+        (mode) => {
+          urlHint.textContent = urlNotes[mode] ?? urlNotes.detailed;
+        },
       );
 
       const keyHint = make.el("p", "zen-tidy-tabs-hint");
@@ -1982,6 +1991,7 @@ Now output only the JSON object.`;
         .zen-tidy-tabs-seg.active { background: ${t.accent}; color: #fff; }
 
         .zen-tidy-tabs-hint { margin: 2px 0 0; font-size: 11px; color: ${t.muted}; }
+        .zen-tidy-tabs-privacy-note { margin: 2px 0 0; font-size: 13px; line-height: 1.45; color: ${t.text}; }
         .zen-tidy-tabs-link { color: ${t.accent}; cursor: pointer; text-decoration: underline; }
 
         /* ---- Buttons ---- */

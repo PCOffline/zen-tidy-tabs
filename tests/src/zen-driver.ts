@@ -416,11 +416,11 @@ export class ZenDriver {
           overlay.remove();
         }
 
-        // Keep Zen's original startup tab as the blank keeper instead of opening
-        // a fresh tab and closing the original. Closing the startup tab leaves a
-        // dangling shutdown blocker that makes a later driver.quit() hang ~60s on
-        // Firefox's async-shutdown watchdog; reusing it avoids that entirely.
-        const keep = gBrowser.tabs[0];
+        // The keeper must be the original startup tab: closing it leaves a
+        // dangling shutdown blocker that hangs driver.quit() ~60s on Firefox's
+        // async-shutdown watchdog. Skip pinned tabs -- pinning reorders a tab to
+        // index 0, so tabs[0] may be a test's pinned tab, not the startup tab.
+        const keep = gBrowser.tabs.find((t) => !t.pinned) ?? gBrowser.tabs[0];
         if (!keep) {
           return true;
         }
@@ -1589,6 +1589,23 @@ export class ZenDriver {
           (b) => (b.textContent || "").trim(),
         ),
       S.segButton,
+    );
+  }
+
+  /** Visible text of the url-mode privacy note (SETTINGS-6). */
+  privacyNoteText(): Promise<string> {
+    return this.exec(
+      (sel: string) =>
+        (document.querySelector<HTMLElement>(sel)?.textContent || "").trim(),
+      S.privacyNote,
+    );
+  }
+
+  /** How many url-mode privacy notes are rendered (SETTINGS-6: exactly one). */
+  privacyNoteCount(): Promise<number> {
+    return this.exec(
+      (sel: string) => document.querySelectorAll(sel).length,
+      S.privacyNote,
     );
   }
 

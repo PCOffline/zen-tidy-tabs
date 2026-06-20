@@ -189,4 +189,37 @@ test.describe("Settings", () => {
       await zen.waitForNoOverlay();
     }
   });
+
+  // SETTINGS-6: the privacy note below the "Tab info sent to AI" control describes
+  // only the currently-selected mode and updates as the selection changes.
+  test("the privacy note reflects the selected url mode", async ({ zen }) => {
+    await zen.rightClickButton();
+    await zen.waitForOverlay();
+    try {
+      expect(
+        await zen.privacyNoteCount(),
+        "a single privacy note is shown",
+      ).toBe(1);
+
+      await zen.selectSegment("Detailed");
+      const detailed = await zen.privacyNoteText();
+      expect(detailed.toLowerCase()).toContain("url");
+
+      await zen.selectSegment("Compact");
+      const compact = await zen.privacyNoteText();
+      expect(compact.toLowerCase()).toContain("hostname");
+
+      await zen.selectSegment("Minimal");
+      const minimal = await zen.privacyNoteText();
+      expect(minimal.toLowerCase()).toContain("only");
+      expect(minimal.toLowerCase()).not.toContain("url");
+      expect(minimal.toLowerCase()).not.toContain("hostname");
+
+      expect(new Set([detailed, compact, minimal]).size).toBe(3);
+      expect(await zen.privacyNoteCount()).toBe(1);
+    } finally {
+      await zen.pressEscape();
+      await zen.waitForNoOverlay();
+    }
+  });
 });
