@@ -25,6 +25,7 @@
     "lint:fix": "biome check . --write",
     "lint:script": "biome check index.uc.js",
     "format": "biome format --write .",
+    "format:script": "biome format --write index.uc.js",
     "release": "node --env-file-if-exists=.env node_modules/release-it/bin/release-it.js",
     "release:dry": "node --env-file-if-exists=.env node_modules/release-it/bin/release-it.js --dry-run",
     "prepare": "husky"
