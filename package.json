@@ -20,7 +20,7 @@
     "test:headful": "cd tests && playwright test",
     "inspect": "cd tests && playwright test -c manual.config.ts",
     "report": "cd tests && playwright show-report",
-    "typecheck": "cd tests && tsc --noEmit",
+    "typecheck": "tsc --noEmit && cd tests && tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "lint:script": "biome check index.uc.js",
@@ -30,17 +30,21 @@
     "release:dry": "node --env-file-if-exists=.env node_modules/release-it/bin/release-it.js --dry-run",
     "prepare": "husky"
   },
+  "overrides": {
+    "undici": "^7.28.0"
+  },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.16",
-    "@playwright/test": "^1.60.0",
-    "@types/node": "^25.9.3",
+    "@biomejs/biome": "^2.5.0",
+    "@playwright/test": "^1.61.0",
+    "@total-typescript/ts-reset": "^0.6.1",
+    "@types/node": "^24.13.2",
     "@types/selenium-webdriver": "^4.35.6",
     "cross-env": "^10.1.0",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.1",
     "geckodriver": "^6.1.0",
-    "husky": "^9.1.0",
-    "release-it": "^19.0.4",
-    "selenium-webdriver": "^4.44.0",
+    "husky": "^9.1.7",
+    "release-it": "^20.2.0",
+    "selenium-webdriver": "^4.45.0",
     "typescript": "^6.0.3"
   }
 }
