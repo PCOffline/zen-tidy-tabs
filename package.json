@@ -21,9 +21,10 @@
     "inspect": "cd tests && playwright test -c manual.config.ts",
     "report": "cd tests && playwright show-report",
     "typecheck": "cd tests && tsc --noEmit",
-    "lint": "cd tests && biome check .",
+    "lint": "biome check .",
+    "lint:fix": "biome check . --write",
     "lint:script": "biome check index.uc.js",
-    "format": "cd tests && biome format --write .",
+    "format": "biome format --write .",
     "release": "node --env-file-if-exists=.env node_modules/release-it/bin/release-it.js",
     "release:dry": "node --env-file-if-exists=.env node_modules/release-it/bin/release-it.js --dry-run",
     "prepare": "husky"
