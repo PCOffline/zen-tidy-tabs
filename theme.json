@@ -6,9 +6,7 @@
   "version": "0.5.0",
   "scripts": {
     "index.uc.js": {
-      "include": [
-        "*browser.xhtml*"
-      ]
+      "include": ["*browser.xhtml*"]
     }
   }
 }
