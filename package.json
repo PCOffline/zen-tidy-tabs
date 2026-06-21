@@ -15,6 +15,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "build": "node esbuild.config.mjs",
     "test": "cd tests && cross-env ZEN_HEADLESS=1 playwright test",
     "test:headful": "cd tests && playwright test",
     "inspect": "cd tests && playwright test -c manual.config.ts",
@@ -23,9 +24,9 @@
     "lint": "cd tests && biome check .",
     "lint:script": "biome check index.uc.js",
     "format": "cd tests && biome format --write .",
-    "format:script": "biome format --write index.uc.js",
     "release": "node --env-file-if-exists=.env node_modules/release-it/bin/release-it.js",
-    "release:dry": "node --env-file-if-exists=.env node_modules/release-it/bin/release-it.js --dry-run"
+    "release:dry": "node --env-file-if-exists=.env node_modules/release-it/bin/release-it.js --dry-run",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",
@@ -33,7 +34,9 @@
     "@types/node": "^25.9.3",
     "@types/selenium-webdriver": "^4.35.6",
     "cross-env": "^10.1.0",
+    "esbuild": "^0.25.0",
     "geckodriver": "^6.1.0",
+    "husky": "^9.1.0",
     "release-it": "^19.0.4",
     "selenium-webdriver": "^4.44.0",
     "typescript": "^6.0.3"
