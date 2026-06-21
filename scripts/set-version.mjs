@@ -30,7 +30,9 @@ function writeThemeVersion(version) {
     theme = { ...JSON.parse(readFileSync(THEME_PATH, "utf8")), version };
   } catch (err) {
     if (err.code !== "ENOENT") {
-      throw new Error(`theme.json exists but is not valid JSON: ${err.message}`);
+      throw new Error(
+        `theme.json exists but is not valid JSON: ${err.message}`,
+      );
     }
     const { scripts, ...rest } = THEME_DEFAULTS;
     theme = { ...rest, version, scripts };
@@ -40,11 +42,18 @@ function writeThemeVersion(version) {
 
 function main() {
   const version = process.argv[2];
-  if (!version) throw new Error("Expected a version argument, e.g. `set-version.mjs 1.2.3`.");
+  if (!version) {
+    throw new Error(
+      "Expected a version argument, e.g. `set-version.mjs 1.2.3`.",
+    );
+  }
 
   execFileSync("npm", ["run", "build"], { cwd: ROOT, stdio: "inherit" });
   writeThemeVersion(version);
-  execFileSync("git", ["add", "index.uc.js", "theme.json"], { cwd: ROOT, stdio: "inherit" });
+  execFileSync("git", ["add", "index.uc.js", "theme.json"], {
+    cwd: ROOT,
+    stdio: "inherit",
+  });
 }
 
 try {

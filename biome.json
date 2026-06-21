@@ -39,7 +39,7 @@
       "suspicious": {
         "useAwait": "error",
         "noEmptyBlockStatements": "error",
-        "noRedundantUseStrict": "off"
+        "noRedundantUseStrict": "error"
       },
       "correctness": {
         "noUndeclaredVariables": "error",
