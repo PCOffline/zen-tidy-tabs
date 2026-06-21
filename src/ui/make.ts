@@ -1,7 +1,7 @@
-import { doc } from "../env.js";
+import { doc } from "../env";
 
 export const make = {
-  el(tag, className, text) {
+  el(tag: string, className?: string, text?: string): HTMLElement {
     const node = doc.createElement(tag);
     if (className) {
       node.className = className;
@@ -11,13 +11,16 @@ export const make = {
     }
     return node;
   },
-  field(labelText, control) {
+  field(labelText: string, control: HTMLElement): HTMLElement {
     const field = make.el("div", "zen-tidy-tabs-field");
     field.append(make.el("label", "zen-tidy-tabs-label", labelText), control);
     return field;
   },
-  input(value, { type = "text", placeholder = "" } = {}) {
-    const input = make.el("input", "zen-tidy-tabs-input");
+  input(
+    value: string | undefined,
+    { type = "text", placeholder = "" } = {},
+  ): HTMLInputElement {
+    const input = make.el("input", "zen-tidy-tabs-input") as HTMLInputElement;
     input.type = type;
     input.value = value ?? "";
     if (placeholder) {
@@ -25,7 +28,7 @@ export const make = {
     }
     return input;
   },
-  button(text, variant = "") {
+  button(text: string, variant = ""): HTMLElement {
     return make.el(
       "button",
       `zen-tidy-tabs-btn${variant ? ` ${variant}` : ""}`,

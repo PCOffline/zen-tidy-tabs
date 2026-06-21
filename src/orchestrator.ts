@@ -1,16 +1,16 @@
-import { ai } from "./ai.js";
-import { CONFIG } from "./config.js";
-import { gBrowser } from "./env.js";
-import { groups } from "./groups.js";
-import { Log } from "./logger.js";
-import { prefs } from "./prefs.js";
-import { tabs } from "./tabs.js";
-import { control } from "./ui/control.js";
+import { ai } from "./ai";
+import { CONFIG } from "./config";
+import { gBrowser } from "./env";
+import { groups } from "./groups";
+import { Log } from "./logger";
+import { prefs } from "./prefs";
+import { tabs } from "./tabs";
+import { control } from "./ui/control";
 
 export const orchestrator = {
-  running: false,
+  running: false as boolean,
 
-  notify(message, isError = false) {
+  notify(message: string, isError = false): void {
     (isError ? Log.tidy.error : Log.tidy.info)(message);
     try {
       const box = gBrowser.getNotificationBox();
@@ -39,7 +39,7 @@ export const orchestrator = {
     }
   },
 
-  async runTidy() {
+  async runTidy(): Promise<void> {
     if (orchestrator.running) {
       Log.tidy.debug(
         "Ignoring Tidy request: a tidy run is already in progress.",
@@ -109,9 +109,9 @@ export const orchestrator = {
         );
         orchestrator.notify("Tidy failed: no groups could be created.", true);
       }
-    } catch (e) {
+    } catch (e: unknown) {
       Log.tidy.error("Tidy run failed.", e);
-      orchestrator.notify(`Tidy failed: ${e.message || e}`, true);
+      orchestrator.notify(`Tidy failed: ${(e as Error).message || e}`, true);
     } finally {
       orchestrator.running = false;
       control.setBusy(false);

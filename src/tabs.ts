@@ -1,10 +1,17 @@
-import { CONFIG } from "./config.js";
-import { getGroupName } from "./dom.js";
-import { gBrowser, win } from "./env.js";
-import { prefs } from "./prefs.js";
+import { CONFIG } from "./config";
+import { getGroupName } from "./dom";
+import { gBrowser, win } from "./env";
+import { prefs, type UrlMode } from "./prefs";
+
+export interface TabSnapshot {
+  i: number;
+  title: string;
+  url?: string;
+  group?: string;
+}
 
 export const tabs = {
-  collect(includeGrouped) {
+  collect(includeGrouped: boolean): ZenTab[] {
     const workspaceId = win.gZenWorkspaces?.activeWorkspace ?? null;
     return gBrowser.tabs.filter((tab) => {
       if (tab.pinned || tab.hidden || tab.closing) {
@@ -27,17 +34,17 @@ export const tabs = {
     });
   },
 
-  isAlive(tab) {
+  isAlive(tab: ZenTab): boolean {
     return (
       tab && !tab.closing && tab.isConnected && gBrowser.tabs.includes(tab)
     );
   },
 
-  title(tab) {
+  title(tab: ZenTab): string {
     return (tab.label ?? "").slice(0, CONFIG.snapshot.titleMax);
   },
 
-  formatUrl(spec, mode) {
+  formatUrl(spec: string, mode: UrlMode): string {
     if (!spec || mode === "minimal") {
       return "";
     }
@@ -48,13 +55,17 @@ export const tabs = {
         return "";
       }
     }
-    return spec.split("?")[0].split("#")[0].slice(0, CONFIG.snapshot.urlMax);
+    return (
+      (spec.split("?")[0] ?? "")
+        .split("#")[0]
+        ?.slice(0, CONFIG.snapshot.urlMax) ?? ""
+    );
   },
 
-  snapshot(list) {
+  snapshot(list: ZenTab[]): TabSnapshot[] {
     const mode = prefs.urlMode();
     return list.map((tab, i) => {
-      const entry = { i, title: tabs.title(tab) };
+      const entry: TabSnapshot = { i, title: tabs.title(tab) };
       const url = tabs.formatUrl(
         tab.linkedBrowser?.currentURI?.spec ?? "",
         mode,

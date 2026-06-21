@@ -1,14 +1,23 @@
-import { getGroupName, setGroupName } from "../dom.js";
-import { doc, gBrowser, win } from "../env.js";
-import { Log } from "../logger.js";
-import { nativePanel } from "./native-panel.js";
+import { getGroupName, setGroupName } from "../dom";
+import { doc, gBrowser, win } from "../env";
+import { Log } from "../logger";
+import { nativePanel } from "./native-panel";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
-export const editor = {
-  active: null,
+interface InlineEditState {
+  input: HTMLInputElement;
+  labelEl: HTMLElement;
+  group: ZenTabGroup;
+  original: string;
+  discard: () => void;
+  cleanup: () => void;
+}
 
-  install() {
+export const editor = {
+  active: null as InlineEditState | null,
+
+  install(): void {
     const prev = win.__zenTidyTabsEditorListeners;
     if (prev) {
       doc.removeEventListener("click", prev.onClick, true);
@@ -23,25 +32,27 @@ export const editor = {
       input.remove();
     });
     doc.querySelectorAll(".zen-tidy-tabs-inline-editing").forEach((label) => {
-      label.style.removeProperty("display");
+      (label as HTMLElement).style.removeProperty("display");
       label.classList.remove("zen-tidy-tabs-inline-editing");
     });
     doc.documentElement.classList.remove("zen-tidy-tabs-editing");
     nativePanel.uninstall();
 
-    const onClick = (e) => {
+    const onClick = (e: MouseEvent) => {
       if (e.button !== 0) {
         return;
       }
-      if (e.target?.closest?.(".zen-tidy-tabs-inline-input")) {
+      if ((e.target as Element)?.closest?.(".zen-tidy-tabs-inline-input")) {
         e.stopPropagation();
         return;
       }
-      const labelEl = e.target?.closest?.(".tab-group-label");
+      const labelEl = (e.target as Element)?.closest?.(
+        ".tab-group-label",
+      ) as HTMLElement | null;
       if (!labelEl) {
         return;
       }
-      const group = labelEl.closest("tab-group");
+      const group = labelEl.closest("tab-group") as ZenTabGroup | null;
       if (!group) {
         return;
       }
@@ -52,14 +63,14 @@ export const editor = {
       editor.startInline(group, labelEl);
     };
 
-    const onContextMenu = (e) => {
-      const hit = e.target?.closest?.(
+    const onContextMenu = (e: MouseEvent) => {
+      const hit = (e.target as Element)?.closest?.(
         ".tab-group-label, .zen-tidy-tabs-inline-input",
       );
       if (!hit) {
         return;
       }
-      const group = hit.closest("tab-group");
+      const group = hit.closest("tab-group") as ZenTabGroup | null;
       if (!group) {
         return;
       }
@@ -85,7 +96,7 @@ export const editor = {
     Log.user.debug("Group label editor installed.");
   },
 
-  startInline(group, labelEl) {
+  startInline(group: ZenTabGroup, labelEl: HTMLElement): void {
     if (editor.active?.labelEl === labelEl) {
       editor.active.input.focus();
       return;
@@ -94,7 +105,7 @@ export const editor = {
 
     const original = getGroupName(group);
 
-    const input = doc.createElementNS(HTML_NS, "input");
+    const input = doc.createElementNS(HTML_NS, "input") as HTMLInputElement;
     input.className = "zen-tidy-tabs-inline-input";
     input.value = original;
     input.setAttribute("aria-label", "Rename group");
@@ -120,10 +131,11 @@ export const editor = {
       "textShadow",
     ];
     INHERITED_STYLE_PROPS.forEach((prop) => {
-      input.style[prop] = cs[prop];
+      (input.style as unknown as Record<string, string>)[prop] =
+        (cs as unknown as Record<string, string>)[prop] ?? "";
     });
 
-    const measure = doc.createElementNS(HTML_NS, "span");
+    const measure = doc.createElementNS(HTML_NS, "span") as HTMLElement;
     measure.style.position = "absolute";
     measure.style.visibility = "hidden";
     measure.style.whiteSpace = "pre";
@@ -136,7 +148,8 @@ export const editor = {
       "letterSpacing",
     ];
     MEASURE_FONT_PROPS.forEach((prop) => {
-      measure.style[prop] = cs[prop];
+      (measure.style as unknown as Record<string, string>)[prop] =
+        (cs as unknown as Record<string, string>)[prop] ?? "";
     });
     const MEASURE_PADDING_PX = 2;
     const MIN_INPUT_WIDTH_PX = 8;
@@ -152,12 +165,12 @@ export const editor = {
     labelEl.classList.add("zen-tidy-tabs-inline-editing");
     doc.documentElement.classList.add("zen-tidy-tabs-editing");
     labelEl.style.display = "none";
-    labelEl.parentNode.insertBefore(input, labelEl);
-    input.parentNode.insertBefore(measure, input);
+    labelEl.parentNode?.insertBefore(input, labelEl);
+    input.parentNode?.insertBefore(measure, input);
     sizeToText();
 
     let settled = false;
-    const finish = (commit) => {
+    const finish = (commit: boolean) => {
       if (settled) {
         return;
       }
@@ -177,7 +190,7 @@ export const editor = {
       }
     };
 
-    const onKey = (e) => {
+    const onKey = (e: KeyboardEvent) => {
       if (e.key === "Enter") {
         e.preventDefault();
         finish(true);
@@ -188,8 +201,8 @@ export const editor = {
       e.stopPropagation();
     };
     const onBlur = () => finish(true);
-    const onDocDown = (e) => {
-      if (e.target === input || input.contains(e.target)) {
+    const onDocDown = (e: MouseEvent) => {
+      if (e.target === input || input.contains(e.target as Node)) {
         return;
       }
       finish(true);
@@ -219,7 +232,7 @@ export const editor = {
     input.select();
   },
 
-  finishInline() {
+  finishInline(): void {
     const state = editor.active;
     if (!state) {
       return;
@@ -232,7 +245,7 @@ export const editor = {
     state.labelEl.classList.remove("zen-tidy-tabs-inline-editing");
   },
 
-  cancelInline() {
+  cancelInline(): void {
     editor.active?.discard?.();
   },
 };

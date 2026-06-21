@@ -15,10 +15,11 @@ const banner = `// ==UserScript==
 // ==/UserScript==`;
 
 await build({
-  entryPoints: ["src/index.js"],
+  entryPoints: ["src/index.ts"],
   outfile: "index.uc.js",
   bundle: true,
   format: "iife",
+  target: "esnext",
   banner: { js: banner },
   charset: "utf8",
   logLevel: "info",

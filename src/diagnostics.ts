@@ -1,9 +1,9 @@
-import { CLEAR_SELECTOR, dom, matchesClear } from "./dom.js";
-import { doc, gBrowser } from "./env.js";
-import { Log } from "./logger.js";
+import { CLEAR_SELECTOR, dom, matchesClear } from "./dom";
+import { doc, gBrowser } from "./env";
+import { Log } from "./logger";
 
 export const diag = {
-  pseudo(el, which) {
+  pseudo(el: Element, which: string): string {
     try {
       return getComputedStyle(el, which).content ?? "";
     } catch {
@@ -11,9 +11,9 @@ export const diag = {
     }
   },
 
-  path(el, depth = 8) {
-    const parts = [];
-    let current = el;
+  path(el: Element | null, depth = 8): string {
+    const parts: string[] = [];
+    let current: Element | null = el;
     for (let i = 0; current && i < depth; i++) {
       parts.unshift(dom.describe(current));
       current = current.parentElement;
@@ -21,7 +21,13 @@ export const diag = {
     return parts.join(" > ");
   },
 
-  clearCandidates() {
+  clearCandidates(): {
+    el: Element;
+    text: string;
+    label: string;
+    tip: string;
+    pseudo: string;
+  }[] {
     return [...doc.querySelectorAll(CLEAR_SELECTOR)]
       .filter(matchesClear)
       .map((el) => ({
@@ -36,7 +42,7 @@ export const diag = {
       }));
   },
 
-  newTabButton() {
+  newTabButton(): Element | null {
     return (
       (doc.getElementById("tabs-newtab-button") ||
         doc.querySelector(
@@ -51,7 +57,7 @@ export const diag = {
     );
   },
 
-  run() {
+  run(): void {
     const MAX_CANDIDATES = 12;
     const TEXT_PREVIEW_LENGTH = 24;
     const PSEUDO_PREVIEW_LENGTH = 40;

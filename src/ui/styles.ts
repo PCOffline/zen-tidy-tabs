@@ -1,7 +1,7 @@
-import { CONFIG } from "../config.js";
-import { doc } from "../env.js";
-import { Log } from "../logger.js";
-import { prefs } from "../prefs.js";
+import { CONFIG } from "../config";
+import { doc } from "../env";
+import { Log } from "../logger";
+import { prefs } from "../prefs";
 
 export const styles = {
   theme: {
@@ -13,7 +13,7 @@ export const styles = {
     accent: "var(--zen-primary-color, #6c5ce7)",
   },
 
-  labelStyleCss() {
+  labelStyleCss(): string {
     if (prefs.labelStyle() !== "text") {
       return "";
     }
@@ -30,7 +30,7 @@ export const styles = {
     `;
   },
 
-  inject() {
+  inject(): void {
     const theme = styles.theme;
     doc.getElementById(CONFIG.ui.styleId)?.remove();
     const style = doc.createElement("style");

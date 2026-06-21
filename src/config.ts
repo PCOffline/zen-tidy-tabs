@@ -76,4 +76,4 @@ export const CONFIG = {
     mountRetryMs: 250,
     mountMaxAttempts: 40,
   },
-};
+} as const;

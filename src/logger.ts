@@ -1,14 +1,21 @@
-import { CONFIG } from "./config.js";
+import { CONFIG } from "./config";
+
+interface Logger {
+  info(...args: unknown[]): void;
+  warn(...args: unknown[]): void;
+  error(...args: unknown[]): void;
+  debug(...args: unknown[]): void;
+}
 
 const PREFIX = "[Zen Tidy Tabs]";
 
-const makeLogger = (stage) => {
+const makeLogger = (stage: string): Logger => {
   const tag = `${PREFIX} [${stage}]`;
   return {
-    info: (...args) => console.info(tag, ...args),
-    warn: (...args) => console.warn(tag, ...args),
-    error: (...args) => console.error(tag, ...args),
-    debug: (...args) => {
+    info: (...args: unknown[]) => console.info(tag, ...args),
+    warn: (...args: unknown[]) => console.warn(tag, ...args),
+    error: (...args: unknown[]) => console.error(tag, ...args),
+    debug: (...args: unknown[]) => {
       if (CONFIG.debug) {
         console.debug(tag, ...args);
       }

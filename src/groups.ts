@@ -1,4 +1,5 @@
-import { CONFIG } from "./config.js";
+import type { GroupPlan } from "./ai";
+import { CONFIG } from "./config";
 import {
   dom,
   getGroupColor,
@@ -7,13 +8,18 @@ import {
   normalizeName,
   setGroupColor,
   setGroupName,
-} from "./dom.js";
-import { doc, gBrowser, win } from "./env.js";
-import { Log } from "./logger.js";
-import { tabs } from "./tabs.js";
+} from "./dom";
+import { doc, gBrowser, win } from "./env";
+import { Log } from "./logger";
+import { tabs } from "./tabs";
+
+export interface ReconcileTally {
+  realized: number;
+  failed: number;
+}
 
 export const groups = {
-  create(members, label, color) {
+  create(members: ZenTab[], label: string, color: string): boolean {
     if (typeof gBrowser.ungroupTab === "function") {
       members
         .filter((tab) => tab.group)
@@ -23,7 +29,7 @@ export const groups = {
           } catch (e) {
             Log.groups.debug(
               "Failed to detach a tab from its current group before regrouping:",
-              e?.message,
+              (e as Error)?.message,
             );
           }
         });
@@ -55,7 +61,7 @@ export const groups = {
       } catch (e) {
         Log.groups.debug(
           `addTabGroup attempt failed for group "${label}":`,
-          e?.message,
+          (e as Error)?.message,
         );
       }
     }
@@ -65,15 +71,15 @@ export const groups = {
     return false;
   },
 
-  apply(plan) {
+  apply(plan: GroupPlan[]): ReconcileTally {
     if (typeof gBrowser.addTabGroup !== "function") {
       throw new Error("gBrowser.addTabGroup is unavailable in this Zen build.");
     }
     return groups.reconcile(plan, groups.existingFor(plan));
   },
 
-  existingFor(plan) {
-    const map = new Map();
+  existingFor(plan: GroupPlan[]): Map<string, ZenTabGroup> {
+    const map = new Map<string, ZenTabGroup>();
     for (const group of plan) {
       for (const tab of group.tabs) {
         if (!tabs.isAlive(tab)) {
@@ -92,21 +98,26 @@ export const groups = {
     return map;
   },
 
-  reconcile(plan, existing) {
-    const tally = { realized: 0, failed: 0 };
-    const usedColors = new Set();
+  reconcile(
+    plan: GroupPlan[],
+    existing: Map<string, ZenTabGroup>,
+  ): ReconcileTally {
+    const tally: ReconcileTally = { realized: 0, failed: 0 };
+    const usedColors = new Set<string>();
     const palette = CONFIG.grouping.colors;
     let paletteIndex = 0;
-    const nextColor = () => {
+    const nextColor = (): string => {
       for (let i = 0; i < palette.length; i++) {
-        const candidate = palette[(paletteIndex + i) % palette.length];
+        const candidate = palette[
+          (paletteIndex + i) % palette.length
+        ] as string;
         if (!usedColors.has(candidate)) {
           paletteIndex += i + 1;
           usedColors.add(candidate);
           return candidate;
         }
       }
-      const fallback = palette[paletteIndex % palette.length];
+      const fallback = palette[paletteIndex % palette.length] as string;
       paletteIndex++;
       usedColors.add(fallback);
       return fallback;
@@ -174,8 +185,8 @@ export const groups = {
     return tally;
   },
 
-  detachAndDissolve(el, stage) {
-    const members = [...getGroupTabs(el)].filter(tabs.isAlive);
+  detachAndDissolve(el: ZenTabGroup, stage: string): number {
+    const members = ([...getGroupTabs(el)] as ZenTab[]).filter(tabs.isAlive);
     if (typeof gBrowser.ungroupTab === "function") {
       members.forEach((tab) => {
         try {
@@ -183,7 +194,7 @@ export const groups = {
         } catch (e) {
           Log.groups.debug(
             `Failed to detach a tab while ${stage}:`,
-            e?.message,
+            (e as Error)?.message,
           );
         }
       });
@@ -192,9 +203,12 @@ export const groups = {
       return members.length;
     }
     try {
-      gBrowser.removeTabGroup?.(el);
+      gBrowser.removeTabGroup(el);
     } catch (e) {
-      Log.groups.debug(`removeTabGroup failed while ${stage}:`, e?.message);
+      Log.groups.debug(
+        `removeTabGroup failed while ${stage}:`,
+        (e as Error)?.message,
+      );
     }
     if (el.isConnected) {
       try {
@@ -206,7 +220,7 @@ export const groups = {
     return members.length;
   },
 
-  dissolve(el) {
+  dissolve(el: ZenTabGroup): void {
     try {
       el.label = "";
       el.removeAttribute?.("label");
@@ -216,15 +230,17 @@ export const groups = {
     groups.detachAndDissolve(el, "dissolving an abandoned group");
   },
 
-  hasLiveTabs(groupEl) {
-    return [...getGroupTabs(groupEl)].some(tabs.isAlive);
+  hasLiveTabs(groupEl: ZenTabGroup): boolean {
+    return ([...getGroupTabs(groupEl)] as ZenTab[]).some(tabs.isAlive);
   },
 
-  removeEmpty() {
+  removeEmpty(): number {
     const section = dom.activeSection() || doc;
     let removed = 0;
 
-    for (const groupEl of [...section.querySelectorAll("tab-group")]) {
+    for (const groupEl of [
+      ...section.querySelectorAll("tab-group"),
+    ] as ZenTabGroup[]) {
       if (groups.hasLiveTabs(groupEl)) {
         continue;
       }
@@ -260,7 +276,7 @@ export const groups = {
     return removed;
   },
 
-  scheduleEmptyCheck() {
+  scheduleEmptyCheck(): void {
     let tries = 0;
     const tick = () => {
       groups.removeEmpty();
@@ -271,10 +287,10 @@ export const groups = {
     setTimeout(tick, CONFIG.timing.emptyCheckDelayMs);
   },
 
-  installEmptyWatcher() {
+  installEmptyWatcher(): void {
     win.__zenTidyTabsEmptyWatcher?.disconnect?.();
     const root = doc.getElementById("tabbrowser-tabs") || doc.documentElement;
-    let pending = null;
+    let pending: ReturnType<typeof setTimeout> | null = null;
     const observer = new MutationObserver(() => {
       if (pending) {
         return;

@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2025",
+    "lib": ["ES2025", "DOM"],
+    "moduleResolution": "Bundler",
+
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+
+    "noEmit": true
+  }
+}

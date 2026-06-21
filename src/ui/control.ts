@@ -1,12 +1,12 @@
-import { CONFIG } from "../config.js";
-import { dom, matchesClear } from "../dom.js";
-import { doc, LOAD_TOKEN, win } from "../env.js";
-import { Log } from "../logger.js";
-import { orchestrator } from "../orchestrator.js";
-import { ui } from "./settings.js";
+import { CONFIG } from "../config";
+import { dom, matchesClear } from "../dom";
+import { doc, LOAD_TOKEN, win } from "../env";
+import { Log } from "../logger";
+import { orchestrator } from "../orchestrator";
+import { ui } from "./settings";
 
 export const control = {
-  build(twin) {
+  build(twin: Element | null): HTMLElement {
     const el = doc.createElement(twin ? twin.tagName : "span");
     el.id = CONFIG.ui.controlId;
     el.textContent = CONFIG.ui.label;
@@ -19,7 +19,7 @@ export const control = {
       el.dataset.twin = "1";
     }
 
-    const tidy = (e) => {
+    const tidy = (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
       Log.user.debug("Tidy control activated (click / command).");
@@ -36,7 +36,7 @@ export const control = {
     return el;
   },
 
-  twinIsCurrent() {
+  twinIsCurrent(): boolean {
     const existing = doc.getElementById(CONFIG.ui.controlId);
     if (!(existing?.dataset?.twin === "1" && existing.isConnected)) {
       return false;
@@ -49,7 +49,7 @@ export const control = {
     );
   },
 
-  placeTwinIfClearPresent() {
+  placeTwinIfClearPresent(): boolean {
     if (control.twinIsCurrent()) {
       return true;
     }
@@ -65,7 +65,7 @@ export const control = {
     return true;
   },
 
-  installClearWatcher() {
+  installClearWatcher(): void {
     const prev = win.__zenTidyTabsClearWatcher;
     if (prev?.token === LOAD_TOKEN) {
       return;
@@ -74,7 +74,7 @@ export const control = {
       prev.target.removeEventListener("mouseover", prev.handler, true);
     }
 
-    const target = doc.documentElement;
+    const target = doc.documentElement as HTMLElement;
     const handler = () => {
       const existing = doc.getElementById(CONFIG.ui.controlId);
       if (
@@ -96,7 +96,7 @@ export const control = {
     );
   },
 
-  installWorkspaceWatcher() {
+  installWorkspaceWatcher(): void {
     const prev = win.__zenTidyTabsWorkspaceWatcher;
     if (prev?.token === LOAD_TOKEN) {
       return;
@@ -116,7 +116,7 @@ export const control = {
     );
   },
 
-  mount() {
+  mount(): boolean {
     control.installClearWatcher();
     control.installWorkspaceWatcher();
     if (control.placeTwinIfClearPresent()) {
@@ -146,7 +146,7 @@ export const control = {
     return !!doc.getElementById(CONFIG.ui.controlId);
   },
 
-  setBusy(busy) {
+  setBusy(busy: boolean): void {
     const el = doc.getElementById(CONFIG.ui.controlId);
     if (!el) {
       return;

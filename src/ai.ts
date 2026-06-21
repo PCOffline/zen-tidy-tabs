@@ -1,8 +1,40 @@
-import { CONFIG } from "./config.js";
-import { Log } from "./logger.js";
+import { CONFIG } from "./config";
+import { Log } from "./logger";
+import type { TabSnapshot } from "./tabs";
+
+export interface GroupPlan {
+  name: string;
+  tabs: ZenTab[];
+}
+
+interface OpenRouterMessage {
+  content: string | { text?: string; content?: string }[];
+  reasoning?: string;
+}
+
+interface OpenRouterChoice {
+  message: OpenRouterMessage;
+  finish_reason: string;
+}
+
+interface OpenRouterResponse {
+  error?: { message?: string };
+  choices?: OpenRouterChoice[];
+  model?: string;
+  usage?: unknown;
+}
+
+interface RequestBody {
+  model: string;
+  temperature: number;
+  seed: number;
+  max_tokens: number;
+  messages: { role: string; content: string }[];
+  response_format?: unknown;
+}
 
 export const ai = {
-  buildPrompt(snapshot) {
+  buildPrompt(snapshot: TabSnapshot[]): string {
     const tabCount = snapshot.length;
     const lastIndex = tabCount - 1;
     const maxGroups = Math.min(
@@ -95,11 +127,11 @@ Output: {"groups":[{"name":"Rust","tabs":[0,1,2]},{"name":"Other","tabs":[3,4]}]
 Now output only the JSON object.`;
   },
 
-  buildUserContent(snapshot) {
+  buildUserContent(snapshot: TabSnapshot[]): string {
     return `<tabs>\n${JSON.stringify(snapshot)}\n</tabs>`;
   },
 
-  responseSchema() {
+  responseSchema(): object {
     return {
       type: "object",
       additionalProperties: false,
@@ -121,7 +153,11 @@ Now output only the JSON object.`;
     };
   },
 
-  async request(snapshot, apiKey, model) {
+  async request(
+    snapshot: TabSnapshot[],
+    apiKey: string,
+    model: string,
+  ): Promise<OpenRouterResponse> {
     const maxTokens = Math.min(
       CONFIG.api.maxTokensCeiling,
       Math.max(
@@ -129,7 +165,7 @@ Now output only the JSON object.`;
         snapshot.length * CONFIG.api.tokensPerTab + CONFIG.api.tokensBuffer,
       ),
     );
-    const base = {
+    const base: RequestBody = {
       model,
       temperature: CONFIG.api.temperature,
       seed: CONFIG.api.seed,
@@ -140,7 +176,7 @@ Now output only the JSON object.`;
       ],
     };
 
-    const formats = [
+    const formats: ({ type: string; json_schema?: object } | null)[] = [
       {
         type: "json_schema",
         json_schema: {
@@ -152,21 +188,23 @@ Now output only the JSON object.`;
       { type: "json_object" },
       null,
     ];
-    let lastError;
+    let lastError: unknown;
     for (let i = 0; i < formats.length; i++) {
-      const body = formats[i]
+      const body: RequestBody = formats[i]
         ? { ...base, response_format: formats[i] }
         : { ...base };
       try {
         return await ai.post(body, apiKey);
-      } catch (e) {
+      } catch (e: unknown) {
+        const err = e as { status?: number; message?: string; name?: string };
         const rejectsFormat =
-          e?.status === 400 &&
-          /response_format|json[_ ]?schema|json/i.test(e.message ?? "");
+          err?.status === 400 &&
+          /response_format|json[_ ]?schema|json/i.test(err.message ?? "");
         if (rejectsFormat && i < formats.length - 1) {
+          const current = formats[i];
           const next = formats[i + 1];
           Log.ai.warn(
-            `Model "${model}" rejected response_format=${formats[i].type} (HTTP 400); retrying with ${next ? next.type : "no response_format"}.`,
+            `Model "${model}" rejected response_format=${current?.type} (HTTP 400); retrying with ${next ? next.type : "no response_format"}.`,
           );
           lastError = e;
           continue;
@@ -177,14 +215,14 @@ Now output only the JSON object.`;
     throw lastError;
   },
 
-  async post(body, apiKey) {
+  async post(body: RequestBody, apiKey: string): Promise<OpenRouterResponse> {
     Log.ai.debug(
       `Requesting completion from OpenRouter (model: ${body.model}, max_tokens: ${body.max_tokens}, timeout: ${CONFIG.api.timeoutMs}ms).`,
     );
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), CONFIG.api.timeoutMs);
 
-    let response;
+    let response: Response;
     try {
       response = await fetch(CONFIG.api.endpoint, {
         method: "POST",
@@ -197,8 +235,9 @@ Now output only the JSON object.`;
         body: JSON.stringify(body),
         signal: controller.signal,
       });
-    } catch (e) {
-      if (e?.name === "AbortError") {
+    } catch (e: unknown) {
+      const err = e as { name?: string };
+      if (err?.name === "AbortError") {
         Log.ai.error(
           `OpenRouter request aborted after exceeding the ${CONFIG.api.timeoutMs / 1000}s timeout (model: ${body.model}).`,
         );
@@ -226,14 +265,16 @@ Now output only the JSON object.`;
       Log.ai.error(
         `OpenRouter request failed with HTTP ${response.status}. Response body (truncated): ${detail}`,
       );
-      const error = new Error(`OpenRouter ${response.status}: ${detail}`);
+      const error: Error & { status?: number } = new Error(
+        `OpenRouter ${response.status}: ${detail}`,
+      );
       error.status = response.status;
       throw error;
     }
-    return response.json();
+    return response.json() as Promise<OpenRouterResponse>;
   },
 
-  extractText(data) {
+  extractText(data: OpenRouterResponse): string {
     if (data.error) {
       const detail = data.error.message || JSON.stringify(data.error);
       Log.ai.error("OpenRouter returned an error payload:", detail);
@@ -290,11 +331,11 @@ Now output only the JSON object.`;
       .trim();
   },
 
-  parseGroups(text, sourceTabs) {
+  parseGroups(text: string, sourceTabs: ZenTab[]): GroupPlan[] {
     const preview = () => text.slice(0, CONFIG.api.outputPreviewMaxChars);
-    let parsed;
+    let parsed: { groups?: { name?: string; tabs?: unknown[] }[] };
     try {
-      parsed = JSON.parse(text);
+      parsed = JSON.parse(text) as typeof parsed;
     } catch {
       Log.ai.debug(
         "Completion was not strict JSON; extracting the first {…} block.",
@@ -307,25 +348,25 @@ Now output only the JSON object.`;
         );
         throw new Error(`Could not parse model output: ${preview()}`);
       }
-      parsed = JSON.parse(match[0]);
+      parsed = JSON.parse(match[0]) as typeof parsed;
     }
 
     const groupList = Array.isArray(parsed?.groups) ? parsed.groups : [];
-    const used = new Set();
-    const result = groupList.reduce((acc, group) => {
+    const used = new Set<number>();
+    const result = groupList.reduce<GroupPlan[]>((acc, group) => {
       const members = (Array.isArray(group?.tabs) ? group.tabs : [])
-        .map((raw) => (typeof raw === "string" ? Number(raw) : raw))
+        .map((raw: unknown) => (typeof raw === "string" ? Number(raw) : raw))
         .filter(
-          (index) =>
+          (index: unknown): index is number =>
             typeof index === "number" &&
             Number.isInteger(index) &&
             index >= 0 &&
             index < sourceTabs.length &&
             !used.has(index),
         )
-        .map((index) => {
+        .map((index: number) => {
           used.add(index);
-          return sourceTabs[index];
+          return sourceTabs[index] as ZenTab;
         });
 
       if (members.length > 0) {
@@ -339,7 +380,10 @@ Now output only the JSON object.`;
 
     const singletonBudget = result.filter((g) => g.tabs.length >= 2).length;
     let singletonsKept = 0;
-    const { kept, overflow } = result.reduce(
+    const { kept, overflow } = result.reduce<{
+      kept: GroupPlan[];
+      overflow: ZenTab[];
+    }>(
       (acc, group) => {
         if (group.tabs.length >= 2) {
           acc.kept.push(group);
@@ -365,7 +409,7 @@ Now output only the JSON object.`;
         `Model left ${ungrouped.length} tab(s) ungrouped; collecting them into "Other".`,
       );
     }
-    const other = [...overflow, ...ungrouped];
+    const other: ZenTab[] = [...overflow, ...ungrouped];
     if (other.length > 0) {
       kept.push({ name: "Other", tabs: other });
     }

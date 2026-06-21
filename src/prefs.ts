@@ -1,15 +1,17 @@
-import { CONFIG } from "./config.js";
-import { Log } from "./logger.js";
+import { CONFIG } from "./config";
+import { Log } from "./logger";
+
+export type UrlMode = "detailed" | "compact" | "minimal";
 
 export const prefs = {
-  get(name, fallback = "") {
+  get(name: string, fallback: string = ""): string {
     try {
       return Services.prefs.getStringPref(name, fallback);
     } catch {
       return fallback;
     }
   },
-  set(name, value) {
+  set(name: string, value: string | undefined): void {
     try {
       Services.prefs.setStringPref(name, value ?? "");
       Log.config.debug(`Saved preference "${name}".`);
@@ -17,19 +19,19 @@ export const prefs = {
       Log.config.error(`Failed to save preference "${name}".`, e);
     }
   },
-  apiKey() {
+  apiKey(): string {
     return prefs.get(CONFIG.prefs.apiKey);
   },
-  model() {
+  model(): string {
     return prefs.get(CONFIG.prefs.model, CONFIG.api.defaultModel);
   },
-  labelStyle() {
+  labelStyle(): string {
     return prefs.get(CONFIG.prefs.labelStyle, "filled");
   },
-  urlMode() {
+  urlMode(): UrlMode {
     const mode = prefs.get(CONFIG.prefs.urlMode, "detailed");
     return ["detailed", "compact", "minimal"].includes(mode)
-      ? mode
+      ? (mode as UrlMode)
       : "detailed";
   },
 };

@@ -1,16 +1,16 @@
-import { CONFIG } from "./config.js";
-import { diag } from "./diagnostics.js";
-import { doc, gBrowser, win } from "./env.js";
-import { groups } from "./groups.js";
-import { Log } from "./logger.js";
-import { orchestrator } from "./orchestrator.js";
-import { tabs } from "./tabs.js";
-import { control } from "./ui/control.js";
-import { editor } from "./ui/editor.js";
-import { ui } from "./ui/settings.js";
-import { styles } from "./ui/styles.js";
+import { CONFIG } from "./config";
+import { diag } from "./diagnostics";
+import { doc, gBrowser, win } from "./env";
+import { groups } from "./groups";
+import { Log } from "./logger";
+import { orchestrator } from "./orchestrator";
+import { tabs } from "./tabs";
+import { control } from "./ui/control";
+import { editor } from "./ui/editor";
+import { ui } from "./ui/settings";
+import { styles } from "./ui/styles";
 
-const init = () => {
+const init = (): void => {
   Log.init.info("Loading Zen Tidy Tabs…");
   Log.init.debug(
     "location:",
@@ -42,7 +42,9 @@ const init = () => {
     let attempts = 0;
     win.__zenTidyTabsMountRetryTimer = setInterval(() => {
       if (control.mount() || ++attempts > CONFIG.timing.mountMaxAttempts) {
-        clearInterval(win.__zenTidyTabsMountRetryTimer);
+        clearInterval(
+          win.__zenTidyTabsMountRetryTimer as ReturnType<typeof setInterval>,
+        );
         win.__zenTidyTabsMountRetryTimer = null;
         if (!doc.getElementById(CONFIG.ui.controlId)) {
           Log.dom.warn(

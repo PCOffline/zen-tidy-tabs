@@ -1,27 +1,30 @@
-import { doc, gBrowser, win } from "./env.js";
+import { doc, gBrowser, win } from "./env";
 
 export const TAB_SELECTOR = "tab, .tabbrowser-tab";
 
-export const normalizeName = (name) =>
+export const normalizeName = (name: string | null | undefined): string =>
   String(name ?? "")
     .trim()
     .toLowerCase();
 
-export const getGroupName = (el) =>
-  (el?.label || el?.getAttribute?.("label") || "").trim();
+export const getGroupName = (
+  el: ZenTabGroup | Element | null | undefined,
+): string =>
+  (el?.getAttribute?.("label") || (el as ZenTabGroup)?.label || "").trim();
 
-export const getGroupColor = (el) =>
-  el?.color ?? el?.getAttribute?.("color") ?? "";
+export const getGroupColor = (
+  el: ZenTabGroup | Element | null | undefined,
+): string => (el as ZenTabGroup)?.color ?? el?.getAttribute?.("color") ?? "";
 
-export const getGroupTabs = (el) =>
+export const getGroupTabs = (el: ZenTabGroup): ZenTab[] | NodeListOf<Element> =>
   el.tabs || el.querySelectorAll(TAB_SELECTOR);
 
-export const setGroupName = (el, name) => {
+export const setGroupName = (el: ZenTabGroup, name: string): void => {
   el.label = name;
   el.setAttribute("label", name);
 };
 
-export const setGroupColor = (el, color) => {
+export const setGroupColor = (el: ZenTabGroup, color: string): void => {
   el.color = color;
   el.setAttribute("color", color);
 };
@@ -29,7 +32,7 @@ export const setGroupColor = (el, color) => {
 export const CLEAR_SELECTOR =
   "toolbarbutton, button, label, span, hbox, vbox, toolbaritem, div, image, [label], [tooltiptext]";
 
-export const matchesClear = (el) => {
+export const matchesClear = (el: Element): boolean => {
   if ((el.getAttribute?.("label") ?? "").trim().toLowerCase() === "clear") {
     return true;
   }
@@ -52,16 +55,16 @@ export const matchesClear = (el) => {
 };
 
 export const dom = {
-  activeWorkspaceEl() {
+  activeWorkspaceEl(): Element | null {
     return (
       win.gZenWorkspaces?.activeWorkspaceElement ||
       doc.querySelector("zen-workspace[active]") ||
-      gBrowser.selectedTab?.closest?.("zen-workspace") ||
+      gBrowser.selectedTab?.closest?.(".zen-workspace-tabs-section") ||
       doc.querySelector("zen-workspace")
     );
   },
 
-  activeSection() {
+  activeSection(): Element | null {
     return (
       gBrowser.selectedTab?.closest?.(".zen-workspace-tabs-section") ||
       doc.querySelector(".zen-workspace-tabs-section[active]") ||
@@ -69,11 +72,11 @@ export const dom = {
     );
   },
 
-  clearControl() {
+  clearControl(): Element | null {
     const scopes = [dom.activeWorkspaceEl(), dom.activeSection(), doc].filter(
-      Boolean,
+      (x): x is Element | Document => Boolean(x),
     );
-    const seen = new Set();
+    const seen = new Set<Element>();
 
     for (const scope of scopes) {
       for (const el of scope.querySelectorAll(CLEAR_SELECTOR)) {
@@ -89,26 +92,27 @@ export const dom = {
     return null;
   },
 
-  firstNormalNode(section) {
+  firstNormalNode(section: Element): Element | null {
     return (
       Array.from(
         section.querySelectorAll("tab-group, tab, .tabbrowser-tab"),
       ).find(
         (el) =>
           dom.isGroupEl(el) ||
-          !(el.pinned || el.hasAttribute?.("zen-essential")),
+          !((el as ZenTab).pinned || el.hasAttribute?.("zen-essential")),
       ) ?? null
     );
   },
 
-  isGroupEl(el) {
+  isGroupEl(el: Element | null | undefined): boolean {
     return (
       (el?.tagName ?? "").toLowerCase() === "tab-group" ||
-      el?.classList?.contains?.("tab-group")
+      el?.classList?.contains?.("tab-group") ||
+      false
     );
   },
 
-  describe(el) {
+  describe(el: Element | null | undefined): string {
     if (!el) {
       return "null";
     }

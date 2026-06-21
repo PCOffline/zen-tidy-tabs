@@ -1,14 +1,18 @@
-import { CONFIG } from "../config.js";
-import { doc, gBrowser, win } from "../env.js";
-import { Log } from "../logger.js";
-import { orchestrator } from "../orchestrator.js";
-import { prefs } from "../prefs.js";
-import { make } from "./make.js";
-import { modal } from "./modal.js";
-import { styles } from "./styles.js";
+import { CONFIG } from "../config";
+import { doc, gBrowser, win } from "../env";
+import { Log } from "../logger";
+import { orchestrator } from "../orchestrator";
+import { prefs } from "../prefs";
+import { make } from "./make";
+import { modal } from "./modal";
+import { styles } from "./styles";
 
 export const ui = {
-  segmentedControl(options, current, onChange) {
+  segmentedControl(
+    options: [string, string][],
+    current: string,
+    onChange?: (value: string) => void,
+  ): { el: HTMLElement; get: () => string } {
     let value = current;
     const segment = make.el("div", "zen-tidy-tabs-segment");
     options.forEach(([optionValue, text]) => {
@@ -29,7 +33,7 @@ export const ui = {
     return { el: segment, get: () => value };
   },
 
-  settings() {
+  settings(): void {
     const { body, footer } = modal.open("Zen Tidy Tabs Settings");
     Log.user.debug("Opened the settings modal.");
 
@@ -48,7 +52,7 @@ export const ui = {
       ],
       prefs.labelStyle(),
     );
-    const urlNotes = {
+    const urlNotes: Record<string, string> = {
       detailed: "The tab's title and full URL are sent to the AI.",
       compact: "The tab's title and hostname are sent to the AI.",
       minimal: "Only the tab's title is sent to the AI.",
@@ -65,8 +69,8 @@ export const ui = {
         ["minimal", "Minimal"],
       ],
       prefs.urlMode(),
-      (mode) => {
-        urlHint.textContent = urlNotes[mode] ?? urlNotes.detailed;
+      (mode: string) => {
+        urlHint.textContent = urlNotes[mode] ?? urlNotes.detailed ?? "";
       },
     );
 
@@ -74,8 +78,8 @@ export const ui = {
     keyHint.append(doc.createTextNode("Key is stored locally. Get one at "));
     const keysUrl = "https://openrouter.ai/keys";
     const link = make.el("a", "zen-tidy-tabs-link", "openrouter.ai/keys");
-    link.href = keysUrl;
-    const openKeysPage = (e) => {
+    link.setAttribute("href", keysUrl);
+    const openKeysPage = (e?: Event) => {
       e?.preventDefault();
       modal.close();
       if (typeof win.openTrustedLinkIn === "function") {
@@ -89,8 +93,8 @@ export const ui = {
       }
     };
     link.addEventListener("click", openKeysPage);
-    link.addEventListener("keydown", (e) => {
-      if (e.key === " ") {
+    link.addEventListener("keydown", (e: Event) => {
+      if ((e as KeyboardEvent).key === " ") {
         openKeysPage(e);
       }
     });

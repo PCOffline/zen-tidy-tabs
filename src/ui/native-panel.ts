@@ -1,11 +1,11 @@
-import { CONFIG } from "../config.js";
-import { getGroupName } from "../dom.js";
-import { doc, gBrowser, win } from "../env.js";
-import { groups } from "../groups.js";
-import { Log } from "../logger.js";
+import { CONFIG } from "../config";
+import { getGroupName } from "../dom";
+import { doc, gBrowser, win } from "../env";
+import { groups } from "../groups";
+import { Log } from "../logger";
 
 export const nativePanel = {
-  customize() {
+  customize(): void {
     if (CONFIG.panel.hideSaveAndClose) {
       nativePanel.hideSaveAndClose();
     }
@@ -14,14 +14,16 @@ export const nativePanel = {
     }
   },
 
-  hideSaveAndClose() {
-    const btn = doc.getElementById(CONFIG.panel.ids.saveAndClose);
+  hideSaveAndClose(): void {
+    const btn = doc.getElementById(
+      CONFIG.panel.ids.saveAndClose,
+    ) as HTMLElement | null;
     if (btn) {
       btn.hidden = true;
     }
   },
 
-  installUngroupOverride() {
+  installUngroupOverride(): void {
     if (win.__zenTidyTabsPanelOverride) {
       return;
     }
@@ -29,8 +31,8 @@ export const nativePanel = {
     if (!panel) {
       return;
     }
-    const onCommand = (e) => {
-      if (e.target?.id !== CONFIG.panel.ids.ungroup) {
+    const onCommand = (e: Event) => {
+      if ((e.target as Element)?.id !== CONFIG.panel.ids.ungroup) {
         return;
       }
       e.preventDefault();
@@ -42,7 +44,7 @@ export const nativePanel = {
     Log.user.debug("Installed 'Ungroup tabs' override on the native panel.");
   },
 
-  uninstall() {
+  uninstall(): void {
     const prev = win.__zenTidyTabsPanelOverride;
     if (!prev) {
       return;
@@ -55,7 +57,7 @@ export const nativePanel = {
     win.__zenTidyTabsPanelOverride = null;
   },
 
-  ungroup(group) {
+  ungroup(group: ZenTabGroup | null | undefined): void {
     if (!group) {
       return;
     }

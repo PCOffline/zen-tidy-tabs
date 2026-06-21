@@ -1,11 +1,15 @@
-import { CONFIG } from "../config.js";
-import { doc } from "../env.js";
-import { make } from "./make.js";
+import { CONFIG } from "../config";
+import { doc } from "../env";
+import { make } from "./make";
 
 export const modal = {
-  keyHandler: null,
+  keyHandler: null as ((e: KeyboardEvent) => void) | null,
 
-  open(title) {
+  open(title: string): {
+    overlay: HTMLElement;
+    body: HTMLElement;
+    footer: HTMLElement;
+  } {
     modal.close();
 
     const overlay = make.el("div", "zen-tidy-tabs-overlay");
@@ -33,7 +37,7 @@ export const modal = {
         modal.close();
       }
     });
-    modal.keyHandler = (e) => {
+    modal.keyHandler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         modal.close();
       } else if (e.key === "Tab") {
@@ -47,18 +51,23 @@ export const modal = {
     return { overlay, body, footer };
   },
 
-  trapFocus(e, panel) {
+  trapFocus(e: KeyboardEvent, panel: HTMLElement): void {
     const focusable = [
       ...panel.querySelectorAll(
         "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
       ),
-    ].filter((el) => !el.disabled && el.offsetParent !== null);
+    ].filter((el): el is HTMLElement => {
+      const htmlEl = el as HTMLElement;
+      return (
+        !(htmlEl as HTMLInputElement).disabled && htmlEl.offsetParent !== null
+      );
+    });
     if (focusable.length === 0) {
       return;
     }
 
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
+    const first = focusable[0] as HTMLElement;
+    const last = focusable[focusable.length - 1] as HTMLElement;
     const active = doc.activeElement;
     if (e.shiftKey && (active === first || !panel.contains(active))) {
       e.preventDefault();
@@ -69,7 +78,7 @@ export const modal = {
     }
   },
 
-  close() {
+  close(): void {
     if (modal.keyHandler) {
       doc.removeEventListener("keydown", modal.keyHandler, true);
       modal.keyHandler = null;
