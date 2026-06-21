@@ -17,6 +17,7 @@ export const selectors = {
   input: ".zen-tidy-tabs-input",
   btnPrimary: ".zen-tidy-tabs-btn.primary",
   segButton: ".zen-tidy-tabs-seg",
+  privacyNote: ".zen-tidy-tabs-privacy-note",
 
   // editor.startInline()
   inlineEditingClass: "zen-tidy-tabs-inline-editing",

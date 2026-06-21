@@ -328,7 +328,8 @@ in-place HTML input the script swaps in for the badge.
   - **Model** — text input; placeholder is the default model (`openai/gpt-4o-mini`).
   - **Group labels** — segmented control: `Colored` (= `filled`) / `Text only` (= `text`).
   - **Tab info sent to AI** — segmented control: `Detailed` / `Compact` / `Minimal`.
-  - Hint text explaining the privacy modes, and a link to `openrouter.ai/keys`.
+  - A privacy note that describes what the selected `urlmode` sends (SETTINGS-6), and a
+    link to `openrouter.ai/keys`.
   _Verified by: `settings.spec.ts › right-clicking the button opens the Zen Tidy Tabs configuration`
   (API key field) and `› saved settings persist…` (model + both segmented controls)._
 
@@ -350,6 +351,13 @@ in-place HTML input the script swaps in for the badge.
   the settings modal**. It never navigates the chrome document itself and never silently
   no-ops when a navigation API is missing.
   _Verified by: `settings.spec.ts › the key-help link is keyboard-reachable and opens the keys page`._
+
+- **SETTINGS-6** — **The privacy note follows the selection.** Directly below the
+  **Tab info sent to AI** control, a single, easy-to-read note states what the *currently
+  selected* mode sends to the AI, and updates immediately when the selection changes:
+  `Detailed` → the tab's title and full URL; `Compact` → the tab's title and hostname;
+  `Minimal` → only the tab's title. Only the active mode's note is shown.
+  _Verified by: `settings.spec.ts › the privacy note reflects the selected url mode`._
 
 ---
 
