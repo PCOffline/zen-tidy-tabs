@@ -26,10 +26,13 @@ export const orchestrator = {
         if (!note) {
           return;
         }
-        setTimeout(
-          () => box.removeNotification(note),
-          CONFIG.timing.notifyDurationMs,
-        );
+        setTimeout(() => {
+          try {
+            box.removeNotification(note);
+          } catch {
+            /* notification already removed */
+          }
+        }, CONFIG.timing.notifyDurationMs);
       });
     } catch {
       /* notification box unavailable */

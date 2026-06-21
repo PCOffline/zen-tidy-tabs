@@ -33,11 +33,17 @@ const init = () => {
     diag.run();
   }
 
+  if (win.__zenTidyTabsMountRetryTimer) {
+    clearInterval(win.__zenTidyTabsMountRetryTimer);
+    win.__zenTidyTabsMountRetryTimer = null;
+  }
+
   if (!control.mount()) {
     let attempts = 0;
-    const timer = setInterval(() => {
+    win.__zenTidyTabsMountRetryTimer = setInterval(() => {
       if (control.mount() || ++attempts > CONFIG.timing.mountMaxAttempts) {
-        clearInterval(timer);
+        clearInterval(win.__zenTidyTabsMountRetryTimer);
+        win.__zenTidyTabsMountRetryTimer = null;
         if (!doc.getElementById(CONFIG.ui.controlId)) {
           Log.dom.warn(
             `Tidy control not placed after ${attempts} attempt(s); it will appear when you hover the tab separator.`,
