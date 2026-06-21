@@ -22,4 +22,5 @@ await build({
   banner: { js: banner },
   charset: "utf8",
   logLevel: "info",
+  minify: true,
 });
