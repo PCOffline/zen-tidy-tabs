@@ -195,6 +195,34 @@
   // DOM access — every selector strategy is isolated here, so there is exactly
   // one place to update when Zen changes its internals.
   // ============================================================================
+
+  // Zen's native "Clear" control has no stable id/class and may render its text
+  // via a `label` attribute, its textContent, or a CSS pseudo-element, so any of
+  // these element kinds can carry it. Both the placement detector and the
+  // diagnostics scan it, so it lives here as the single source of truth.
+  const CLEAR_SELECTOR =
+    "toolbarbutton, button, label, span, hbox, vbox, toolbaritem, div, image, [label], [tooltiptext]";
+
+  // Does `el` render the Clear control? Matching is exact on label/text so a
+  // neighbouring control whose text merely contains "clear" isn't mistaken for
+  // it; childless elements may carry the word only in a ::before/::after.
+  const matchesClear = (el) => {
+    if ((el.getAttribute?.("label") || "").trim().toLowerCase() === "clear")
+      return true;
+    if ((el.textContent || "").trim().toLowerCase() === "clear") return true;
+    if (!el.children.length) {
+      for (const pseudo of ["::before", "::after"]) {
+        try {
+          if (/clear/i.test(getComputedStyle(el, pseudo).content || ""))
+            return true;
+        } catch {
+          /* detached node */
+        }
+      }
+    }
+    return false;
+  };
+
   const dom = {
     // The active workspace element. Zen keeps one <zen-workspace> per workspace
     // in the DOM (only one is [active]); the native Clear control lives inside
@@ -229,31 +257,12 @@
         Boolean,
       );
       const seen = new Set();
-      const selector =
-        "toolbarbutton, button, label, span, hbox, vbox, toolbaritem, [label], [tooltiptext]";
 
       for (const scope of scopes) {
-        for (const el of scope.querySelectorAll(selector)) {
+        for (const el of scope.querySelectorAll(CLEAR_SELECTOR)) {
           if (seen.has(el)) continue;
           seen.add(el);
-
-          if (
-            (el.getAttribute?.("label") || "").trim().toLowerCase() === "clear"
-          )
-            return el;
-          if ((el.textContent || "").trim().toLowerCase() === "clear")
-            return el;
-
-          if (!el.children.length) {
-            try {
-              for (const pseudo of ["::before", "::after"]) {
-                if (/clear/i.test(getComputedStyle(el, pseudo).content || ""))
-                  return el;
-              }
-            } catch {
-              /* detached node */
-            }
-          }
+          if (matchesClear(el)) return el;
         }
       }
       return null;
@@ -949,43 +958,29 @@ Now output only the JSON object.`;
       return tally;
     },
 
-    // Synchronously dissolve a group the re-tidy abandoned: detach every live
-    // tab to the top level (the tabs stay open) and remove the now-empty group
-    // element. Native ungroupTab/removeTabGroup are animated AND deferred, so
-    // under load they don't tear the element down in the same frame -- which is
-    // what let the old groups stay painted, named, beneath the new layout (the
-    // re-tidy "two stacked groups" flicker; TIDY-9). Stripping the name FIRST,
-    // synchronously, is the one thing we can guarantee in-frame: from that point
-    // the husk is an anonymous, emptying element, never a named group competing
-    // with the new ones. The detach + removal below (and the empty-group sweep)
-    // finish the actual teardown.
-    dissolve(el) {
-      try {
-        el.label = "";
-        el.removeAttribute?.("label");
-      } catch {
-        /* non-fatal */
-      }
-
-      for (const tab of [...getGroupTabs(el)].filter(tabs.isAlive)) {
+    // Detach every live tab in `el` to the top level (the tabs stay open), then
+    // remove the now-empty group element. Native ungroupTab/removeTabGroup are
+    // animated AND deferred, so when teardown can't finish in-frame the
+    // empty-group sweep completes it later. Returns the number of tabs detached.
+    // `stage` tags the debug logs so each caller's failures stay attributable.
+    detachAndDissolve(el, stage) {
+      const members = [...getGroupTabs(el)].filter(tabs.isAlive);
+      for (const tab of members) {
         if (typeof gBrowser.ungroupTab !== "function") break;
         try {
           gBrowser.ungroupTab(tab);
         } catch (e) {
           Log.groups.debug(
-            "Failed to detach a tab while dissolving an abandoned group:",
+            `Failed to detach a tab while ${stage}:`,
             e?.message,
           );
         }
       }
-      if (groups.hasLiveTabs(el)) return; // teardown deferred; the empty-group sweep finishes it
+      if (groups.hasLiveTabs(el)) return members.length; // teardown deferred to the sweep
       try {
         gBrowser.removeTabGroup?.(el);
       } catch (e) {
-        Log.groups.debug(
-          "removeTabGroup failed while dissolving an abandoned group:",
-          e?.message,
-        );
+        Log.groups.debug(`removeTabGroup failed while ${stage}:`, e?.message);
       }
       if (el.isConnected) {
         try {
@@ -994,6 +989,23 @@ Now output only the JSON object.`;
           /* already detached */
         }
       }
+      return members.length;
+    },
+
+    // Synchronously dissolve a group the re-tidy abandoned. Stripping the name
+    // FIRST, synchronously, is the one thing we can guarantee in-frame: from
+    // that point the husk is an anonymous, emptying element, never a named group
+    // competing with the new ones (the re-tidy "two stacked groups" flicker;
+    // TIDY-9). The detach + removal below (and the empty-group sweep) finish the
+    // actual teardown.
+    dissolve(el) {
+      try {
+        el.label = "";
+        el.removeAttribute?.("label");
+      } catch {
+        /* non-fatal */
+      }
+      groups.detachAndDissolve(el, "dissolving an abandoned group");
     },
 
     // Is a group element holding at least one tab that isn't closing?
@@ -1484,30 +1496,13 @@ Now output only the JSON object.`;
     ungroup(group) {
       if (!group) return;
       const name = getGroupName(group);
-      const members = [...getGroupTabs(group)].filter(tabs.isAlive);
-      for (const tab of members) {
-        try {
-          gBrowser.ungroupTab(tab);
-        } catch (e) {
-          Log.user.warn(`Failed to ungroup a tab from "${name}".`, e);
-        }
-      }
-      try {
-        if (
-          !groups.hasLiveTabs(group) &&
-          typeof gBrowser.removeTabGroup === "function"
-        ) {
-          gBrowser.removeTabGroup(group);
-        }
-      } catch (e) {
-        Log.user.debug("removeTabGroup after ungroup failed:", e?.message);
-      }
+      const detached = groups.detachAndDissolve(group, `ungrouping "${name}"`);
       try {
         gBrowser.tabGroupMenu?.close?.();
       } catch {
         /* panel may already be gone */
       }
-      Log.user.info(`Ungrouped ${members.length} tab(s) from "${name}".`);
+      Log.user.info(`Ungrouped ${detached} tab(s) from "${name}".`);
     },
   };
 
@@ -2065,21 +2060,19 @@ Now output only the JSON object.`;
       return parts.join(" > ");
     },
 
-    // Every element whose text / label / tooltip / pseudo says "clear".
+    // Every element the placement detector would recognise as Clear, with the
+    // raw fields it matched on, for diagnosing why the twin did or didn't mount.
     clearCandidates() {
       const hits = [];
-      const selector =
-        "toolbarbutton, button, label, span, hbox, vbox, toolbaritem, div, image, [label], [tooltiptext]";
-      for (const el of doc.querySelectorAll(selector)) {
+      for (const el of doc.querySelectorAll(CLEAR_SELECTOR)) {
+        if (!matchesClear(el)) continue;
         const text = (el.textContent || "").trim();
         const label = el.getAttribute?.("label") || "";
         const tip = el.getAttribute?.("tooltiptext") || "";
         const pseudo = el.children.length
           ? ""
           : diag.pseudo(el, "::before") + diag.pseudo(el, "::after");
-        if (/clear/i.test(`${text} ${label} ${tip} ${pseudo}`)) {
-          hits.push({ el, text, label, tip, pseudo });
-        }
+        hits.push({ el, text, label, tip, pseudo });
       }
       return hits;
     },
