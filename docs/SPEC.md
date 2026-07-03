@@ -133,10 +133,18 @@ in-place HTML input the script swaps in for the badge.
   emptied pre-existing groups are removed synchronously as the new layout is built.
   _Verified by: `tidying.spec.ts › re-tidying never paints the old groups beneath the new ones`._
 
-- **TIDY-10** — On success the run notifies how many tabs were sorted into how many
-  groups; on failure it notifies the failure.
-  _Verified by: `tidy-run.spec.ts › notifies success with the tab and group counts` and
-  `› notifies failure when the model call fails`._
+- **TIDY-10** — On full success the run notifies how many tabs were sorted into how many
+  groups (the group count is the number actually **realized** — reused in place or newly
+  created — not the number requested). When some groups are realized but others fail to
+  be created, the run notifies the partial outcome — how many groups were realized and how
+  many failed — as an error, without claiming every source tab was sorted (tabs from a
+  group that failed to be created may remain where they were). When no group is realized
+  at all, the run notifies failure. A `gBrowser.addTabGroup` call that returns a falsy
+  value counts as a failed creation, exactly like one that throws.
+  _Verified by: `tidy-run.spec.ts › notifies success with the tab and group counts`,
+  `› notifies failure when the model call fails`,
+  `› notifies failure when group creation silently fails`, and
+  `› notifies partial outcome when some groups fail to create`._
 
 - **TIDY-11** — Eligible tabs are collected from the **active workspace only**: a tab that
   belongs to another workspace is never collected, even if it is otherwise eligible.

@@ -814,14 +814,13 @@ Now output only the JSON object.`;
       for (const options of attempts) {
         try {
           const group = gBrowser.addTabGroup(members, options);
+          if (!group) continue;
           // Some builds ignore the label/color options; set them explicitly.
-          if (group) {
-            try {
-              if (label) setGroupName(group, label);
-              if (color) setGroupColor(group, color);
-            } catch {
-              /* non-fatal */
-            }
+          try {
+            if (label) setGroupName(group, label);
+            if (color) setGroupColor(group, color);
+          } catch {
+            /* non-fatal */
           }
           return true;
         } catch (e) {
@@ -846,7 +845,7 @@ Now output only the JSON object.`;
           "gBrowser.addTabGroup is unavailable in this Zen build.",
         );
       }
-      groups.reconcile(plan, groups.existingFor(plan));
+      return groups.reconcile(plan, groups.existingFor(plan));
     },
 
     // Map of normalized name -> group element for the groups that currently hold
@@ -873,8 +872,10 @@ Now output only the JSON object.`;
     // In-place reconcile against current groups. Groups whose name survives are
     // KEPT in place (position + color preserved); only the tabs that actually
     // changed are moved. Genuinely new groups are created; groups the plan
-    // abandoned empty out and dissolve.
+    // abandoned empty out and dissolve. Returns a tally of groups realized
+    // (reused or created) vs. failed, so the caller can report a truthful outcome.
     reconcile(plan, existing) {
+      const tally = { realized: 0, failed: 0 };
       const usedColors = new Set();
       const palette = CONFIG.grouping.colors;
       let paletteIndex = 0;
@@ -932,14 +933,20 @@ Now output only the JSON object.`;
               );
             }
           }
+          tally.realized++;
         } else {
           const color = nextColor();
           Log.groups.debug(
             `Creating new group "${group.name}" with ${live.length} tab(s) (color: ${color}).`,
           );
-          groups.create(live, group.name, color);
+          if (groups.create(live, group.name, color)) {
+            tally.realized++;
+          } else {
+            tally.failed++;
+          }
         }
       }
+      return tally;
     },
 
     // Synchronously dissolve a group the re-tidy abandoned: detach every live
@@ -2002,17 +2009,32 @@ Now output only the JSON object.`;
           plan.map((g) => `${g.name}(${g.tabs.length})`).join(", "),
         );
 
-        groups.apply(plan);
+        const { realized, failed } = groups.apply(plan);
         groups.scheduleEmptyCheck();
-        Log.tidy.info(
-          `Tidy complete: sorted ${sourceTabs.length} tab(s) into ${plan.length} group(s).`,
-        );
-        orchestrator.notify(
-          `Sorted ${sourceTabs.length} tabs into ${plan.length} groups.`,
-        );
+        if (failed === 0) {
+          Log.tidy.info(
+            `Tidy complete: sorted ${sourceTabs.length} tab(s) into ${realized} group(s).`,
+          );
+          orchestrator.notify(
+            `Sorted ${sourceTabs.length} tabs into ${realized} groups.`,
+          );
+        } else if (realized > 0) {
+          Log.tidy.warn(
+            `Tidy partially complete: realized ${realized} group(s), ${failed} could not be created.`,
+          );
+          orchestrator.notify(
+            `Tidied into ${realized} groups; ${failed} could not be created.`,
+            true,
+          );
+        } else {
+          Log.tidy.error(
+            `Tidy failed: none of the ${plan.length} group(s) could be created.`,
+          );
+          orchestrator.notify("Tidy failed: no groups could be created.", true);
+        }
       } catch (e) {
         Log.tidy.error("Tidy run failed.", e);
-        orchestrator.notify(`failed: ${e.message || e}`, true);
+        orchestrator.notify(`Tidy failed: ${e.message || e}`, true);
       } finally {
         orchestrator.running = false;
         control.setBusy(false);
