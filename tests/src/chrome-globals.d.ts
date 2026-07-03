@@ -48,6 +48,8 @@ declare global {
     getNotificationBox(): {
       getNotificationWithValue?(value: string): NotificationElement | null;
       removeNotification?(note: NotificationElement): void;
+      /** Threshold above which a notification is styled as a warning/error. */
+      PRIORITY_WARNING_LOW?: number;
     };
   }
 
@@ -56,6 +58,8 @@ declare global {
     messageText?: { textContent?: string };
     label?: string;
     getAttribute?(name: string): string | null;
+    /** Numeric priority the notification was appended with (info-low..critical-high). */
+    priority?: number;
   }
 
   const gBrowser: GBrowser;

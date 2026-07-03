@@ -1650,6 +1650,31 @@ export class ZenDriver {
     });
   }
 
+  /**
+   * Whether the script's current notification is styled as an error (priority
+   * at or above the notification box's warning threshold). Returns null if
+   * there is no current notification or the priority cannot be read.
+   */
+  lastNotificationIsError(): Promise<boolean | null> {
+    return this.exec(() => {
+      try {
+        const box = gBrowser.getNotificationBox();
+        const note = box.getNotificationWithValue?.("zen-tidy-tabs-msg");
+        if (!note) {
+          return null;
+        }
+        const priority = note.priority;
+        const threshold = box.PRIORITY_WARNING_LOW ?? 4;
+        if (typeof priority !== "number") {
+          return null;
+        }
+        return priority >= threshold;
+      } catch {
+        return null;
+      }
+    });
+  }
+
   /** Remove any of the script's notifications so a test starts from a clean box. */
   async clearNotifications(): Promise<void> {
     await this.exec(() => {

@@ -142,8 +142,9 @@ in-place HTML input the script swaps in for the badge.
   at all, the run notifies failure. A `gBrowser.addTabGroup` call that returns a falsy
   value counts as a failed creation, exactly like one that throws.
   _Verified by: `tidy-run.spec.ts › notifies success with the tab and group counts`,
-  `› notifies failure when the model call fails`, and
-  `› notifies failure when group creation silently fails`._
+  `› notifies failure when the model call fails`,
+  `› notifies failure when group creation silently fails`, and
+  `› notifies partial outcome when some groups fail to create`._
 
 - **TIDY-11** — Eligible tabs are collected from the **active workspace only**: a tab that
   belongs to another workspace is never collected, even if it is otherwise eligible.

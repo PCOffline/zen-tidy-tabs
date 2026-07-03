@@ -208,6 +208,70 @@ test.describe("Tidy run", () => {
     }
   });
 
+  // TIDY-10: when some planned groups are realized but others fail to be
+  // created, the run notifies the partial outcome (as an error) and still
+  // leaves the successful group(s) on the page.
+  test("notifies partial outcome when some groups fail to create", async ({
+    zen,
+  }) => {
+    await zen.openTabs(4, "Partial ");
+    await zen.installFetchStub({
+      groups: [
+        { name: "GoodGroup", tabs: [0, 1] },
+        { name: "BadGroup", tabs: [2, 3] },
+      ],
+    });
+    // Deterministic per-label wrapper: `groups.create()` may retry up to three
+    // option shapes per group, so a call-count based stub could starve the
+    // successful group of its legitimate attempt. Gating on `opts.label` makes
+    // exactly one group fail regardless of retry behaviour.
+    await zen.exec(() => {
+      window.__zenTidyTabsOrigAddTabGroup = gBrowser.addTabGroup;
+      gBrowser.addTabGroup = function (tabs, opts) {
+        if (
+          opts?.label === "GoodGroup" &&
+          window.__zenTidyTabsOrigAddTabGroup
+        ) {
+          return window.__zenTidyTabsOrigAddTabGroup.call(this, tabs, opts);
+        }
+        return null;
+      };
+      return true;
+    });
+    try {
+      await zen.clickButton();
+      await zen.driver.wait(
+        async () => {
+          const note = await zen.lastNotification();
+          return (
+            note != null &&
+            /Tidied into 1 groups; 1 could not be created\./.test(note)
+          );
+        },
+        20_000,
+        "no partial-outcome notification was shown",
+        200,
+      );
+      expect(
+        await zen.lastNotificationIsError(),
+        "the partial-outcome notification is styled as an error",
+      ).toBe(true);
+      expect(
+        await zen.groupLabels(),
+        "the successful group survives a partial run",
+      ).toContain("GoodGroup");
+    } finally {
+      await zen.exec(() => {
+        if (window.__zenTidyTabsOrigAddTabGroup) {
+          gBrowser.addTabGroup = window.__zenTidyTabsOrigAddTabGroup;
+          window.__zenTidyTabsOrigAddTabGroup = undefined;
+        }
+        return true;
+      });
+      await zen.restoreFetch();
+    }
+  });
+
   // TIDY-14: a notification's auto-dismiss removes only itself, never a later one.
   // With one eligible tab every Tidy click bails on the minimum (TIDY-4) and shows a
   // fresh notification. We reproduce the real cross-test interference: a notification
