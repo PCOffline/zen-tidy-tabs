@@ -2020,10 +2020,10 @@ Now output only the JSON object.`;
           );
         } else if (realized > 0) {
           Log.tidy.warn(
-            `Tidy partially complete: created ${realized} group(s), ${failed} could not be created.`,
+            `Tidy partially complete: realized ${realized} group(s), ${failed} could not be created.`,
           );
           orchestrator.notify(
-            `Sorted ${sourceTabs.length} tabs into ${realized} groups; ${failed} could not be created.`,
+            `Tidied into ${realized} groups; ${failed} could not be created.`,
             true,
           );
         } else {

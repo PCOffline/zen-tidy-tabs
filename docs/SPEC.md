@@ -134,11 +134,13 @@ in-place HTML input the script swaps in for the badge.
   _Verified by: `tidying.spec.ts › re-tidying never paints the old groups beneath the new ones`._
 
 - **TIDY-10** — On full success the run notifies how many tabs were sorted into how many
-  groups (the group count is the number actually created, not the number requested). When
-  some groups are created but others fail, the run notifies the partial outcome — how many
-  groups were created and how many failed — as an error. When no group is created at all,
-  the run notifies failure. A `gBrowser.addTabGroup` call that returns a falsy value counts
-  as a failed creation, exactly like one that throws.
+  groups (the group count is the number actually **realized** — reused in place or newly
+  created — not the number requested). When some groups are realized but others fail to
+  be created, the run notifies the partial outcome — how many groups were realized and how
+  many failed — as an error, without claiming every source tab was sorted (tabs from a
+  group that failed to be created may remain where they were). When no group is realized
+  at all, the run notifies failure. A `gBrowser.addTabGroup` call that returns a falsy
+  value counts as a failed creation, exactly like one that throws.
   _Verified by: `tidy-run.spec.ts › notifies success with the tab and group counts`,
   `› notifies failure when the model call fails`, and
   `› notifies failure when group creation silently fails`._
